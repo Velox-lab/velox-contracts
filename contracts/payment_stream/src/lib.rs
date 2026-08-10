@@ -90,36 +90,14 @@ impl PaymentStream {
     }
 
     /// Sender cancels the stream and reclaims all unstreamed tokens.
+    /// Pays out any earned balance to the recipient first, then returns the rest to sender.
     pub fn cancel(env: Env) {
         let sender: Address = env.storage().persistent().get(&StreamKey::Sender).unwrap();
         sender.require_auth();
 
         Self::assert_stream_is_active(&env);
-
-        // Pay out whatever the recipient has earned up to now
-        let claimable = Self::calculate_claimable_balance(&env);
-        let recipient: Address = env.storage().persistent().get(&StreamKey::Recipient).unwrap();
-        let token: Address = env.storage().persistent().get(&StreamKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token);
-
-        if claimable > 0 {
-            let total_withdrawn: i128 =
-                env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap();
-            env.storage()
-                .persistent()
-                .set(&StreamKey::TotalWithdrawn, &(total_withdrawn + claimable));
-            token_client.transfer(&env.current_contract_address(), &recipient, &claimable);
-        }
-
-        // Return remaining balance to sender
-        let total_funded: i128 = env.storage().persistent().get(&StreamKey::TotalFunded).unwrap();
-        let total_withdrawn: i128 =
-            env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap();
-        let remaining = total_funded - total_withdrawn;
-
-        if remaining > 0 {
-            token_client.transfer(&env.current_contract_address(), &sender, &remaining);
-        }
+        Self::pay_out_earned_balance(&env);
+        Self::return_remaining_to_sender(&env);
 
         env.storage()
             .persistent()
@@ -183,6 +161,43 @@ impl PaymentStream {
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// Transfer any balance the recipient has earned up to this moment.
+    /// Called during cancellation before returning funds to sender.
+    fn pay_out_earned_balance(env: &Env) {
+        let claimable = Self::calculate_claimable_balance(env);
+        if claimable <= 0 {
+            return;
+        }
+
+        let recipient: Address = env.storage().persistent().get(&StreamKey::Recipient).unwrap();
+        let token: Address = env.storage().persistent().get(&StreamKey::Token).unwrap();
+        let total_withdrawn: i128 = env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap();
+
+        env.storage()
+            .persistent()
+            .set(&StreamKey::TotalWithdrawn, &(total_withdrawn + claimable));
+
+        let token_client = token::Client::new(env, &token);
+        token_client.transfer(&env.current_contract_address(), &recipient, &claimable);
+    }
+
+    /// Transfer all unstreamed tokens back to the sender.
+    /// Called during cancellation after paying out the recipient's earned balance.
+    fn return_remaining_to_sender(env: &Env) {
+        let total_funded: i128 = env.storage().persistent().get(&StreamKey::TotalFunded).unwrap();
+        let total_withdrawn: i128 = env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap();
+        let remaining = total_funded - total_withdrawn;
+
+        if remaining <= 0 {
+            return;
+        }
+
+        let sender: Address = env.storage().persistent().get(&StreamKey::Sender).unwrap();
+        let token: Address = env.storage().persistent().get(&StreamKey::Token).unwrap();
+        let token_client = token::Client::new(env, &token);
+        token_client.transfer(&env.current_contract_address(), &sender, &remaining);
+    }
 
     /// Calculate how many tokens are claimable at the current ledger timestamp.
     /// claimable = (rate * elapsed) - already_withdrawn
