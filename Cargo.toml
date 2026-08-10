@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "contracts/stream_factory",
+    "contracts/payment_stream",
+    "contracts/recurring_payment",
+    "contracts/velox_registry",
+]
+resolver = "2"
