@@ -40,7 +40,7 @@ The core streaming contract. Holds funds in escrow and releases them to the reci
 - `cancel(sender)` — sender cancels and reclaims unstreamed funds
 - `top_up(sender, amount)` — sender adds more funds to extend the stream
 - `get_claimable_balance(recipient)` — view how much is currently withdrawable
-- `get_stream_status()` — returns `Active`, `Paused`, `Completed`, or `Cancelled`
+- `get_stream_status()` — returns `Active`, `Completed`, or `Cancelled`
 
 ### `RecurringPayment`
 Handles fixed-interval recurring payments (e.g., weekly payroll, monthly subscriptions).
@@ -191,7 +191,7 @@ velox-contracts/
 
 ## Contributing
 
-This repository is part of the **Velox** open-source project on the Stellar ecosystem. Contributions are welcome and rewarded through the Stellar Wave Program.
+This repository is part of the **Velox** open-source project built on the Stellar ecosystem. Contributions are welcome.
 
 **Before you contribute:**
 1. Read the [Contributing Guide](CONTRIBUTING.md)
