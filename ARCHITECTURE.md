@@ -85,16 +85,17 @@ State machine:
                │
                ▼
            [ Active ]
-          /     │     \
-  cancel()   top_up()  withdraw()
-      │                    │
-      ▼                    ▼
- [Cancelled]          (partial or full)
-                           │
-                    end_time reached
-                           │
-                           ▼
-                      [Completed]
+          /           \
+  cancel()          withdraw()
+      │                  │
+      ▼                  ▼
+ [Cancelled]        (partial or full)
+                         │
+                  end_time reached
+                  + balance = zero
+                         │
+                         ▼
+                    [Completed]
 ```
 
 Key invariants:
