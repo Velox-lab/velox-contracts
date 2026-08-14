@@ -138,6 +138,40 @@ mod tests {
         client.execute_payment();
     }
 
+    // ── get_schedule_info ─────────────────────────────────────────────────────
+
+    #[test]
+    fn get_schedule_info_returns_all_fields_correctly() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = RecurringPaymentClient::new(&env, &contract_id);
+
+        let (sender, recipient, token) = setup_schedule(&env, &client);
+
+        let info = client.get_schedule_info();
+        assert_eq!(info.sender, sender);
+        assert_eq!(info.recipient, recipient);
+        assert_eq!(info.token, token);
+        assert_eq!(info.amount, 100_i128);
+        assert_eq!(info.interval, 604_800_u64);
+        assert_eq!(info.next_payment_time, 1_604_800_u64);
+    }
+
+    #[test]
+    fn get_schedule_info_reflects_cancelled_status_after_cancel() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = RecurringPaymentClient::new(&env, &contract_id);
+
+        setup_schedule(&env, &client);
+
+        env.mock_all_auths();
+        client.cancel();
+
+        let info = client.get_schedule_info();
+        assert_eq!(info.status, ScheduleStatus::Cancelled);
+    }
+
     // ── cancel ────────────────────────────────────────────────────────────────
 
     #[test]

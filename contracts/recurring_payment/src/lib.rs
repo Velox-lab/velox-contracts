@@ -24,6 +24,19 @@ pub enum ScheduleStatus {
     Completed,
 }
 
+/// A snapshot of the full schedule state returned by get_schedule_info.
+#[contracttype]
+#[derive(Clone)]
+pub struct ScheduleInfo {
+    pub sender: Address,
+    pub recipient: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub interval: u64,
+    pub next_payment_time: u64,
+    pub status: ScheduleStatus,
+}
+
 // ── Contract ──────────────────────────────────────────────────────────────────
 
 #[contract]
@@ -133,6 +146,20 @@ impl RecurringPayment {
     /// Returns the interval in seconds between payments.
     pub fn get_interval(env: Env) -> u64 {
         env.storage().persistent().get(&ScheduleKey::Interval).unwrap()
+    }
+
+    /// Returns a complete snapshot of all schedule fields in a single call.
+    pub fn get_schedule_info(env: Env) -> ScheduleInfo {
+        let storage = env.storage().persistent();
+        ScheduleInfo {
+            sender: storage.get(&ScheduleKey::Sender).unwrap(),
+            recipient: storage.get(&ScheduleKey::Recipient).unwrap(),
+            token: storage.get(&ScheduleKey::Token).unwrap(),
+            amount: storage.get(&ScheduleKey::Amount).unwrap(),
+            interval: storage.get(&ScheduleKey::Interval).unwrap(),
+            next_payment_time: storage.get(&ScheduleKey::NextPaymentTime).unwrap(),
+            status: storage.get(&ScheduleKey::Status).unwrap(),
+        }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
