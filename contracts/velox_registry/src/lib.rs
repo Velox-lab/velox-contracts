@@ -110,4 +110,40 @@ impl VeloxRegistry {
             .persistent()
             .get(&RegistryKey::Schedule(schedule_id))
     }
+
+    /// Return all streams where sender matches the given address.
+    pub fn list_streams_by_sender(env: Env, sender: Address) -> Vec<StreamEntry> {
+        let all: Vec<StreamEntry> = env
+            .storage()
+            .persistent()
+            .get(&RegistryKey::AllStreams)
+            .unwrap_or(Vec::new(&env));
+
+        let mut result = Vec::new(&env);
+        for i in 0..all.len() {
+            let entry = all.get(i).unwrap();
+            if entry.sender == sender {
+                result.push_back(entry);
+            }
+        }
+        result
+    }
+
+    /// Return all streams where recipient matches the given address.
+    pub fn list_streams_by_recipient(env: Env, recipient: Address) -> Vec<StreamEntry> {
+        let all: Vec<StreamEntry> = env
+            .storage()
+            .persistent()
+            .get(&RegistryKey::AllStreams)
+            .unwrap_or(Vec::new(&env));
+
+        let mut result = Vec::new(&env);
+        for i in 0..all.len() {
+            let entry = all.get(i).unwrap();
+            if entry.recipient == recipient {
+                result.push_back(entry);
+            }
+        }
+        result
+    }
 }
