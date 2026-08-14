@@ -208,7 +208,42 @@ mod tests {
         client.cancel(); // second cancel should panic
     }
 
-    // ── top_up ────────────────────────────────────────────────────────────────
+    // ── get_stream_info ───────────────────────────────────────────────────────
+
+    #[test]
+    fn get_stream_info_returns_all_fields_correctly() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        let (sender, recipient, token) = setup_stream(&env, &client);
+
+        let info = client.get_stream_info();
+        assert_eq!(info.sender, sender);
+        assert_eq!(info.recipient, recipient);
+        assert_eq!(info.token, token);
+        assert_eq!(info.rate_per_second, 10_i128);
+        assert_eq!(info.start_time, 1000_u64);
+        assert_eq!(info.end_time, 1100_u64);
+        assert_eq!(info.total_funded, 1000_i128);
+        assert_eq!(info.total_withdrawn, 0_i128);
+    }
+
+    #[test]
+    fn get_stream_info_reflects_updated_total_withdrawn_after_withdraw() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        setup_stream(&env, &client);
+
+        env.ledger().set_timestamp(1050);
+        env.mock_all_auths();
+        client.withdraw();
+
+        let info = client.get_stream_info();
+        assert_eq!(info.total_withdrawn, 500_i128);
+    }
 
     #[test]
     fn top_up_increases_total_funded() {

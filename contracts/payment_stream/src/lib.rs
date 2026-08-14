@@ -26,6 +26,22 @@ pub enum StreamStatus {
     Completed,
 }
 
+/// A snapshot of the full stream state returned by get_stream_info.
+/// Allows callers to read all stream fields in a single contract call.
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamInfo {
+    pub sender: Address,
+    pub recipient: Address,
+    pub token: Address,
+    pub rate_per_second: i128,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub total_funded: i128,
+    pub total_withdrawn: i128,
+    pub status: StreamStatus,
+}
+
 // ── Contract ──────────────────────────────────────────────────────────────────
 
 #[contract]
@@ -158,6 +174,23 @@ impl PaymentStream {
     /// Returns the total amount withdrawn from the stream so far.
     pub fn get_total_withdrawn(env: Env) -> i128 {
         env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap()
+    }
+
+    /// Returns a complete snapshot of all stream fields in a single call.
+    /// Preferred over calling individual getters when multiple fields are needed.
+    pub fn get_stream_info(env: Env) -> StreamInfo {
+        let storage = env.storage().persistent();
+        StreamInfo {
+            sender: storage.get(&StreamKey::Sender).unwrap(),
+            recipient: storage.get(&StreamKey::Recipient).unwrap(),
+            token: storage.get(&StreamKey::Token).unwrap(),
+            rate_per_second: storage.get(&StreamKey::RatePerSecond).unwrap(),
+            start_time: storage.get(&StreamKey::StartTime).unwrap(),
+            end_time: storage.get(&StreamKey::EndTime).unwrap(),
+            total_funded: storage.get(&StreamKey::TotalFunded).unwrap(),
+            total_withdrawn: storage.get(&StreamKey::TotalWithdrawn).unwrap(),
+            status: storage.get(&StreamKey::Status).unwrap(),
+        }
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
