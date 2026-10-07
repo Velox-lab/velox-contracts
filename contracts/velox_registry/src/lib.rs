@@ -57,7 +57,7 @@ impl VeloxRegistry {
 
         env.storage()
             .persistent()
-            .set(&RegistryKey::Stream(entry.stream_id), &entry);
+            .set(&RegistryKey::Stream(entry.stream_id.clone()), &entry);
     }
 
     /// Register a new recurring payment schedule in the registry.
@@ -78,7 +78,7 @@ impl VeloxRegistry {
 
         env.storage()
             .persistent()
-            .set(&RegistryKey::Schedule(entry.schedule_id), &entry);
+            .set(&RegistryKey::Schedule(entry.schedule_id.clone()), &entry);
     }
 
     /// Return all registered streams.
@@ -147,3 +147,6 @@ impl VeloxRegistry {
         result
     }
 }
+
+#[cfg(test)]
+mod tests;
