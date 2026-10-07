@@ -113,16 +113,18 @@ Key invariants:
 
 Unlike `PaymentStream` which streams continuously, `RecurringPayment` releases discrete payments at defined intervals. It does not trigger itself — the `velox-scheduler` calls `execute_payment()` at each interval.
 
+Funds stay in the sender's account. After `initialize()`, the sender calls `approve()` on the token with the schedule contract as spender; each payment is pulled with `transfer_from`. The approved amount caps the schedule's total spend, and the sender can revoke it at any time.
+
 ```
-Caller (velox-scheduler)
+Caller (velox-scheduler, or anyone)
   │
   ▼
 RecurringPayment.execute_payment(schedule_id)
   │
-  ├── Check: is payment due? (now >= next_payment_time)
   ├── Check: is schedule active?
-  ├── Transfer token amount to recipient
-  └── Update next_payment_time += interval
+  ├── Check: is payment due? (now >= next_payment_time)
+  ├── Update next_payment_time += interval
+  └── transfer_from(sender → recipient, amount) using the sender's allowance
 ```
 
 ---
@@ -218,8 +220,9 @@ Each contract uses Soroban's key-value storage. Storage keys are typed enums to 
 - All sensitive functions use `require_auth()` on the caller
 - `withdraw()` — authorized to recipient only
 - `cancel()` — authorized to sender only
-- `execute_payment()` — authorized to a designated operator address
-- `register_stream()` on VeloxRegistry — authorized to StreamFactory only
+- `execute_payment()` — permissionless; it can only move the fixed amount to the fixed recipient once per interval, within the sender's token allowance
+- `initialize()` — can only be called once per contract; a second call panics with `already initialized`
+- `register_stream()` on VeloxRegistry — authorized to StreamFactory only (not yet enforced: currently requires the entry's sender)
 
 ### Reentrancy
 - Soroban's execution model prevents reentrancy at the protocol level

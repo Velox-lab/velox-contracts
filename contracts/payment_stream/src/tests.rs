@@ -74,6 +74,36 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "already initialized")]
+    fn initialize_panics_when_called_twice() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        let (_sender, _recipient, token) = setup_stream(&env, &client);
+
+        // An attacker tries to overwrite the stream with themselves as recipient
+        let attacker = Address::generate(&env);
+        client.initialize(&attacker, &attacker, &token, &10, &1000_u64, &1100_u64, &1000);
+    }
+
+    #[test]
+    #[should_panic(expected = "start_time must not be in the past")]
+    fn initialize_panics_when_start_time_is_in_the_past() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| li.timestamp = 5000);
+        client.initialize(&sender, &recipient, &token, &10, &1000_u64, &6000_u64, &1000);
+    }
+
+    #[test]
     #[should_panic(expected = "start_time must be before end_time")]
     fn initialize_panics_when_start_time_after_end_time() {
         let env = create_env();

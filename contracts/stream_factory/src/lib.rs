@@ -31,6 +31,7 @@ impl StreamFactory {
         admin.require_auth();
 
         let storage = env.storage().persistent();
+        assert!(!storage.has(&FactoryKey::Admin), "already initialized");
         storage.set(&FactoryKey::Admin, &admin);
         storage.set(&FactoryKey::Registry, &registry);
         storage.set(&FactoryKey::StreamWasm, &stream_wasm_hash);

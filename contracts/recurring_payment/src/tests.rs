@@ -2,7 +2,7 @@
 mod tests {
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
-        token::StellarAssetClient,
+        token::{StellarAssetClient, TokenClient},
         Address, Env,
     };
     use crate::{RecurringPayment, RecurringPaymentClient, ScheduleStatus};
@@ -44,6 +44,10 @@ mod tests {
             &604_800_u64,       // interval: 7 days in seconds
             &1_604_800_u64,     // first payment in ~7 days
         );
+
+        // Sender allows the schedule to pull up to 1_000 tokens (10 payments)
+        let expiration_ledger = env.ledger().sequence() + 100_000;
+        TokenClient::new(env, &token).approve(&sender, &client.address, &1_000, &expiration_ledger);
 
         (sender, recipient, token)
     }
@@ -132,6 +136,56 @@ mod tests {
 
         // Next payment should be one interval later
         assert_eq!(client.get_next_payment_time(), 1_604_800_u64 + 604_800_u64);
+    }
+
+    #[test]
+    #[should_panic(expected = "already initialized")]
+    fn initialize_panics_when_called_twice() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = RecurringPaymentClient::new(&env, &contract_id);
+
+        setup_schedule(&env, &client);
+
+        // An attacker tries to overwrite the schedule with themselves as recipient
+        let attacker = Address::generate(&env);
+        client.initialize(&attacker, &attacker, &Address::generate(&env), &1, &1_u64, &1_604_800_u64);
+    }
+
+    #[test]
+    fn execute_payment_transfers_amount_without_sender_signature() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = RecurringPaymentClient::new(&env, &contract_id);
+
+        let (sender, recipient, token) = setup_schedule(&env, &client);
+        let token_client = TokenClient::new(&env, &token);
+
+        // Clear all mocked auths: execute_payment must succeed with no signatures at all
+        env.set_auths(&[]);
+        env.ledger().with_mut(|li| li.timestamp = 1_604_800);
+        client.execute_payment();
+
+        assert_eq!(token_client.balance(&recipient), 100);
+        assert_eq!(token_client.balance(&sender), 9_900);
+        assert_eq!(token_client.allowance(&sender, &contract_id), 900);
+    }
+
+    #[test]
+    #[should_panic]
+    fn execute_payment_panics_when_allowance_is_exhausted() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = RecurringPaymentClient::new(&env, &contract_id);
+
+        let (sender, _recipient, token) = setup_schedule(&env, &client);
+
+        // Sender revokes the allowance
+        let expiration_ledger = env.ledger().sequence() + 100_000;
+        TokenClient::new(&env, &token).approve(&sender, &contract_id, &0, &expiration_ledger);
+
+        env.ledger().with_mut(|li| li.timestamp = 1_604_800);
+        client.execute_payment();
     }
 
     #[test]
