@@ -273,3 +273,6 @@ impl PaymentStream {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

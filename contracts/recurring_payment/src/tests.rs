@@ -2,6 +2,7 @@
 mod tests {
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
+        token::StellarAssetClient,
         Address, Env,
     };
     use crate::{RecurringPayment, RecurringPaymentClient, ScheduleStatus};
@@ -16,14 +17,24 @@ mod tests {
         env.register_contract(None, RecurringPayment)
     }
 
+    /// Deploys a test token and mints `amount` to `holder`. Returns the token address.
+    fn create_funded_token(env: &Env, holder: &Address, amount: i128) -> Address {
+        let admin = Address::generate(env);
+        let token = env.register_stellar_asset_contract_v2(admin).address();
+        env.mock_all_auths();
+        StellarAssetClient::new(env, &token).mint(holder, &amount);
+        token
+    }
+
     /// Sets up a weekly schedule: 100 tokens every 604800 seconds (7 days).
+    /// The sender is minted 10_000 tokens so multiple payments can execute.
     fn setup_schedule(env: &Env, client: &RecurringPaymentClient) -> (Address, Address, Address) {
         let sender = Address::generate(env);
         let recipient = Address::generate(env);
-        let token = Address::generate(env);
+        let token = create_funded_token(env, &sender, 10_000);
 
         env.mock_all_auths();
-        env.ledger().set_timestamp(1_000_000);
+        env.ledger().with_mut(|li| li.timestamp = 1_000_000);
 
         client.initialize(
             &sender,
@@ -84,7 +95,7 @@ mod tests {
         let token = Address::generate(&env);
 
         env.mock_all_auths();
-        env.ledger().set_timestamp(1_000_000);
+        env.ledger().with_mut(|li| li.timestamp = 1_000_000);
         client.initialize(&sender, &recipient, &token, &0, &604_800_u64, &1_604_800_u64);
     }
 
@@ -100,7 +111,7 @@ mod tests {
         let token = Address::generate(&env);
 
         env.mock_all_auths();
-        env.ledger().set_timestamp(1_000_000);
+        env.ledger().with_mut(|li| li.timestamp = 1_000_000);
         client.initialize(&sender, &recipient, &token, &100, &0_u64, &1_604_800_u64);
     }
 
@@ -115,7 +126,7 @@ mod tests {
         setup_schedule(&env, &client);
 
         // Move time to when first payment is due
-        env.ledger().set_timestamp(1_604_800);
+        env.ledger().with_mut(|li| li.timestamp = 1_604_800);
         env.mock_all_auths();
         client.execute_payment();
 
@@ -133,7 +144,7 @@ mod tests {
         setup_schedule(&env, &client);
 
         // Try to execute before the first payment is due
-        env.ledger().set_timestamp(1_000_001);
+        env.ledger().with_mut(|li| li.timestamp = 1_000_001);
         env.mock_all_auths();
         client.execute_payment();
     }
@@ -214,7 +225,7 @@ mod tests {
         env.mock_all_auths();
         client.cancel();
 
-        env.ledger().set_timestamp(1_604_800);
+        env.ledger().with_mut(|li| li.timestamp = 1_604_800);
         client.execute_payment(); // should panic — schedule cancelled
     }
 }

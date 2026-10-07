@@ -174,3 +174,6 @@ impl RecurringPayment {
         assert!(status == ScheduleStatus::Active, "schedule is not active");
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -70,7 +70,7 @@ mod tests {
         setup_factory(&env, &client);
 
         env.mock_all_auths();
-        env.ledger().set_timestamp(1000);
+        env.ledger().with_mut(|li| li.timestamp = 1000);
 
         client.create_stream(
             &Address::generate(&env),
@@ -92,7 +92,7 @@ mod tests {
         setup_factory(&env, &client);
 
         env.mock_all_auths();
-        env.ledger().set_timestamp(1000);
+        env.ledger().with_mut(|li| li.timestamp = 1000);
 
         client.create_stream(
             &Address::generate(&env),
@@ -114,7 +114,7 @@ mod tests {
         setup_factory(&env, &client);
 
         env.mock_all_auths();
-        env.ledger().set_timestamp(1000);
+        env.ledger().with_mut(|li| li.timestamp = 1000);
 
         client.create_stream(
             &Address::generate(&env),

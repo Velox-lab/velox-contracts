@@ -2,6 +2,7 @@
 mod tests {
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
+        token::StellarAssetClient,
         Address, Env,
     };
     use crate::{PaymentStream, PaymentStreamClient, StreamStatus};
@@ -16,14 +17,24 @@ mod tests {
         env.register_contract(None, PaymentStream)
     }
 
+    /// Deploys a test token and mints `amount` to `holder`. Returns the token address.
+    fn create_funded_token(env: &Env, holder: &Address, amount: i128) -> Address {
+        let admin = Address::generate(env);
+        let token = env.register_stellar_asset_contract_v2(admin).address();
+        env.mock_all_auths();
+        StellarAssetClient::new(env, &token).mint(holder, &amount);
+        token
+    }
+
     /// Sets up a basic stream: 10 tokens/sec, 100 seconds, 1000 total funded.
+    /// The sender is minted 10_000 tokens so top-ups can be tested.
     fn setup_stream(env: &Env, client: &PaymentStreamClient) -> (Address, Address, Address) {
         let sender = Address::generate(env);
         let recipient = Address::generate(env);
-        let token = Address::generate(env);
+        let token = create_funded_token(env, &sender, 10_000);
 
         env.mock_all_auths();
-        env.ledger().set_timestamp(1000);
+        env.ledger().with_mut(|li| li.timestamp = 1000);
 
         client.initialize(
             &sender,
@@ -102,7 +113,7 @@ mod tests {
 
         setup_stream(&env, &client);
 
-        env.ledger().set_timestamp(500); // before start
+        env.ledger().with_mut(|li| li.timestamp = 500); // before start
         assert_eq!(client.get_claimable_balance(), 0_i128);
     }
 
@@ -114,7 +125,7 @@ mod tests {
 
         setup_stream(&env, &client);
 
-        env.ledger().set_timestamp(1050); // 50 seconds in
+        env.ledger().with_mut(|li| li.timestamp = 1050); // 50 seconds in
         assert_eq!(client.get_claimable_balance(), 500_i128); // 10/sec * 50
     }
 
@@ -126,7 +137,7 @@ mod tests {
 
         setup_stream(&env, &client);
 
-        env.ledger().set_timestamp(9999); // far past end_time
+        env.ledger().with_mut(|li| li.timestamp = 9999); // far past end_time
         assert_eq!(client.get_claimable_balance(), 1000_i128); // capped at funded
     }
 
@@ -140,7 +151,7 @@ mod tests {
 
         setup_stream(&env, &client);
 
-        env.ledger().set_timestamp(1050);
+        env.ledger().with_mut(|li| li.timestamp = 1050);
         env.mock_all_auths();
         client.withdraw();
 
@@ -155,7 +166,7 @@ mod tests {
 
         setup_stream(&env, &client);
 
-        env.ledger().set_timestamp(1050);
+        env.ledger().with_mut(|li| li.timestamp = 1050);
         env.mock_all_auths();
         client.withdraw();
 
@@ -171,7 +182,7 @@ mod tests {
 
         setup_stream(&env, &client);
 
-        env.ledger().set_timestamp(1000); // at start, nothing earned yet
+        env.ledger().with_mut(|li| li.timestamp = 1000); // at start, nothing earned yet
         env.mock_all_auths();
         client.withdraw();
     }
@@ -186,7 +197,7 @@ mod tests {
 
         setup_stream(&env, &client);
 
-        env.ledger().set_timestamp(1050);
+        env.ledger().with_mut(|li| li.timestamp = 1050);
         env.mock_all_auths();
         client.cancel();
 
@@ -202,7 +213,7 @@ mod tests {
 
         setup_stream(&env, &client);
 
-        env.ledger().set_timestamp(1050);
+        env.ledger().with_mut(|li| li.timestamp = 1050);
         env.mock_all_auths();
         client.cancel();
         client.cancel(); // second cancel should panic
@@ -237,7 +248,7 @@ mod tests {
 
         setup_stream(&env, &client);
 
-        env.ledger().set_timestamp(1050);
+        env.ledger().with_mut(|li| li.timestamp = 1050);
         env.mock_all_auths();
         client.withdraw();
 

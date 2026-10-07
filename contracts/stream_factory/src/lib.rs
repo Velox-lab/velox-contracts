@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, BytesN};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env};
 
 // ── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -9,6 +9,7 @@ pub enum FactoryKey {
     StreamWasm,     // WASM hash of PaymentStream contract
     ScheduleWasm,   // WASM hash of RecurringPayment contract
     Admin,          // Admin address allowed to update WASM hashes
+    DeployNonce,    // Counter used to derive a unique salt per deployment
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -63,17 +64,7 @@ impl StreamFactory {
         // Deploy a fresh PaymentStream contract instance
         let stream_address = env
             .deployer()
-            .with_current_contract(env.crypto().sha256(&soroban_sdk::Bytes::from_array(
-                &env,
-                &[
-                    sender.clone().to_string().as_bytes(),
-                    recipient.clone().to_string().as_bytes(),
-                    &start_time.to_be_bytes(),
-                ]
-                .concat()
-                .try_into()
-                .unwrap_or([0u8; 32]),
-            )))
+            .with_current_contract(Self::next_deploy_salt(&env))
             .deploy(wasm_hash);
 
         // TODO: invoke PaymentStream.initialize on the deployed instance
@@ -107,17 +98,7 @@ impl StreamFactory {
 
         let schedule_address = env
             .deployer()
-            .with_current_contract(env.crypto().sha256(&soroban_sdk::Bytes::from_array(
-                &env,
-                &[
-                    sender.clone().to_string().as_bytes(),
-                    recipient.clone().to_string().as_bytes(),
-                    &first_payment_time.to_be_bytes(),
-                ]
-                .concat()
-                .try_into()
-                .unwrap_or([0u8; 32]),
-            )))
+            .with_current_contract(Self::next_deploy_salt(&env))
             .deploy(wasm_hash);
 
         // TODO: invoke RecurringPayment.initialize on the deployed instance
@@ -149,4 +130,26 @@ impl StreamFactory {
         admin.require_auth();
         env.storage().persistent().set(&FactoryKey::ScheduleWasm, &new_hash);
     }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// Derive a unique deployment salt from an incrementing nonce.
+    /// Guarantees every deployed instance gets a distinct contract address.
+    fn next_deploy_salt(env: &Env) -> BytesN<32> {
+        let nonce: u64 = env
+            .storage()
+            .persistent()
+            .get(&FactoryKey::DeployNonce)
+            .unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&FactoryKey::DeployNonce, &(nonce + 1));
+
+        env.crypto()
+            .sha256(&Bytes::from_array(env, &nonce.to_be_bytes()))
+            .into()
+    }
 }
+
+#[cfg(test)]
+mod tests;
