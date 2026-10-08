@@ -46,6 +46,10 @@ pub struct RecurringPayment;
 impl RecurringPayment {
     /// Initialise the recurring payment schedule.
     /// Called once by the sender to set the schedule parameters.
+    ///
+    /// The schedule pulls each payment from the sender via `transfer_from`, so the
+    /// sender must also call `approve` on the token with this contract as spender.
+    /// The approved amount caps the total the schedule can ever pay out.
     pub fn initialize(
         env: Env,
         sender: Address,
@@ -57,6 +61,10 @@ impl RecurringPayment {
     ) {
         sender.require_auth();
 
+        assert!(
+            !env.storage().persistent().has(&ScheduleKey::Status),
+            "already initialized"
+        );
         assert!(amount > 0, "amount must be greater than zero");
         assert!(interval > 0, "interval must be greater than zero");
         assert!(
@@ -76,7 +84,10 @@ impl RecurringPayment {
 
     /// Execute a single scheduled payment.
     /// Called by the velox-scheduler daemon when payment is due.
-    /// Transfers the fixed amount from sender to recipient.
+    /// Transfers the fixed amount from sender to recipient using the sender's allowance.
+    ///
+    /// Permissionless: no signature is required because the call can only move the
+    /// fixed amount, to the fixed recipient, once per interval.
     pub fn execute_payment(env: Env) {
         Self::assert_schedule_is_active(&env);
 
@@ -99,15 +110,13 @@ impl RecurringPayment {
         let amount: i128 = env.storage().persistent().get(&ScheduleKey::Amount).unwrap();
         let interval: u64 = env.storage().persistent().get(&ScheduleKey::Interval).unwrap();
 
-        sender.require_auth();
-
-        let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&sender, &recipient, &amount);
-
-        // Advance next payment time by one interval
+        // Advance next payment time before transferring, per the update-then-transfer rule
         env.storage()
             .persistent()
             .set(&ScheduleKey::NextPaymentTime, &(next_payment_time + interval));
+
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer_from(&env.current_contract_address(), &sender, &recipient, &amount);
     }
 
     /// Sender cancels the recurring schedule. No further payments will be made.

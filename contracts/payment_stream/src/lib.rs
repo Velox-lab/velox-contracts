@@ -63,7 +63,15 @@ impl PaymentStream {
     ) {
         sender.require_auth();
 
+        assert!(
+            !env.storage().persistent().has(&StreamKey::Status),
+            "already initialized"
+        );
         assert!(start_time < end_time, "start_time must be before end_time");
+        assert!(
+            start_time >= env.ledger().timestamp(),
+            "start_time must not be in the past"
+        );
         assert!(rate_per_second > 0, "rate must be greater than zero");
         assert!(total_funded > 0, "funded amount must be greater than zero");
 

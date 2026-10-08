@@ -59,6 +59,24 @@ mod tests {
         assert_eq!(client.get_admin(), admin);
     }
 
+    #[test]
+    #[should_panic(expected = "already initialized")]
+    fn initialize_panics_when_called_twice() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = StreamFactoryClient::new(&env, &contract_id);
+        setup_factory(&env, &client);
+
+        // An attacker tries to take over as admin
+        let attacker = Address::generate(&env);
+        client.initialize(
+            &attacker,
+            &Address::generate(&env),
+            &dummy_wasm_hash(&env),
+            &dummy_wasm_hash(&env),
+        );
+    }
+
     // ── create_stream validation ──────────────────────────────────────────────
 
     #[test]

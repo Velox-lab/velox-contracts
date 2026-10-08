@@ -46,7 +46,7 @@ The core streaming contract. Holds funds in escrow and releases them to the reci
 Handles fixed-interval recurring payments (e.g., weekly payroll, monthly subscriptions).
 
 - `create_schedule(sender, recipient, token, amount, interval, start_time)`
-- `execute_payment(schedule_id)` — called by the scheduler daemon at each interval
+- `execute_payment(schedule_id)` — called by the scheduler daemon at each interval; pulls the payment from the sender via token allowance (the sender must `approve` the schedule contract as spender), so no sender signature is needed
 - `cancel_schedule(sender, schedule_id)`
 - `get_next_payment_time(schedule_id)`
 
