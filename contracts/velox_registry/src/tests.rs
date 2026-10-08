@@ -7,8 +7,71 @@ mod tests {
         Env::default()
     }
 
+    /// Deploys the registry with a generated admin and a generated factory set.
     fn register_contract(env: &Env) -> Address {
-        env.register_contract(None, VeloxRegistry)
+        let contract_id = env.register(VeloxRegistry, (Address::generate(env),));
+        env.mock_all_auths();
+        VeloxRegistryClient::new(env, &contract_id).set_factory(&Address::generate(env));
+        contract_id
+    }
+
+    fn sample_stream_entry(env: &Env) -> StreamEntry {
+        StreamEntry {
+            stream_id: Address::generate(env),
+            sender: Address::generate(env),
+            recipient: Address::generate(env),
+            registered_at: 1000,
+        }
+    }
+
+    // ── access control ───────────────────────────────────────────────────────
+
+    #[test]
+    fn set_factory_stores_factory_address() {
+        let env = create_env();
+        let contract_id = env.register(VeloxRegistry, (Address::generate(&env),));
+        let client = VeloxRegistryClient::new(&env, &contract_id);
+        let factory = Address::generate(&env);
+
+        assert_eq!(client.get_factory(), None);
+        env.mock_all_auths();
+        client.set_factory(&factory);
+
+        assert_eq!(client.get_factory(), Some(factory));
+    }
+
+    #[test]
+    #[should_panic]
+    fn set_factory_panics_without_admin_auth() {
+        let env = create_env();
+        let contract_id = env.register(VeloxRegistry, (Address::generate(&env),));
+        let client = VeloxRegistryClient::new(&env, &contract_id);
+
+        // No auths mocked: the admin has not signed
+        client.set_factory(&Address::generate(&env));
+    }
+
+    #[test]
+    #[should_panic(expected = "factory not set")]
+    fn register_stream_panics_when_factory_not_set() {
+        let env = create_env();
+        let contract_id = env.register(VeloxRegistry, (Address::generate(&env),));
+        let client = VeloxRegistryClient::new(&env, &contract_id);
+
+        env.mock_all_auths();
+        client.register_stream(&sample_stream_entry(&env));
+    }
+
+    #[test]
+    #[should_panic]
+    fn register_stream_panics_without_factory_auth() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = VeloxRegistryClient::new(&env, &contract_id);
+
+        // Clear mocked auths: an arbitrary caller cannot write entries
+        env.set_auths(&[]);
+        client.register_stream(&sample_stream_entry(&env));
     }
 
     // ── register_stream ──────────────────────────────────────────────────────

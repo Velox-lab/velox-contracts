@@ -14,7 +14,7 @@ mod tests {
     }
 
     fn register_contract(env: &Env) -> Address {
-        env.register_contract(None, PaymentStream)
+        env.register(PaymentStream, ())
     }
 
     /// Deploys a test token and mints `amount` to `holder`. Returns the token address.

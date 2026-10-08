@@ -140,7 +140,7 @@ RecurringPayment.execute_payment(schedule_id)
 
 ```
 StreamFactory ──▶ VeloxRegistry.register_stream()
-RecurringPayment ▶ VeloxRegistry.register_schedule()
+StreamFactory ──▶ VeloxRegistry.register_schedule()
 
 velox-scheduler ──▶ VeloxRegistry.get_all_active()
 velox-frontend  ──▶ VeloxRegistry.list_streams_by_sender(address)
@@ -222,7 +222,7 @@ Each contract uses Soroban's key-value storage. Storage keys are typed enums to 
 - `cancel()` — authorized to sender only
 - `execute_payment()` — permissionless; it can only move the fixed amount to the fixed recipient once per interval, within the sender's token allowance
 - `initialize()` — can only be called once per contract; a second call panics with `already initialized`
-- `register_stream()` on VeloxRegistry — authorized to StreamFactory only (not yet enforced: currently requires the entry's sender)
+- `register_stream()` / `register_schedule()` on VeloxRegistry — authorized to the factory set by the registry admin via `set_factory()` only
 
 ### Reentrancy
 - Soroban's execution model prevents reentrancy at the protocol level
@@ -269,10 +269,11 @@ Contracts at the bottom have no Velox-internal dependencies — they can be depl
 ## Deployment Order
 
 ```
-1. Deploy VeloxRegistry
-2. Deploy PaymentStream (WASM, used as template)
-3. Deploy RecurringPayment
-4. Deploy StreamFactory (with VeloxRegistry address as constructor arg)
+1. Deploy VeloxRegistry (constructor arg: admin address)
+2. Upload PaymentStream WASM (used as template; note its hash)
+3. Upload RecurringPayment WASM (used as template; note its hash)
+4. Deploy StreamFactory, then call initialize(admin, registry, stream_hash, schedule_hash)
+5. Registry admin calls VeloxRegistry.set_factory(factory_address)
 ```
 
 ---
