@@ -126,11 +126,11 @@ Write a failing test → Write the minimum code to pass it → Refactor → Repe
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install Soroban CLI
-cargo install --locked soroban-cli
+# Install Stellar CLI
+cargo install --locked stellar-cli
 
 # Add the Wasm target
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32v1-none
 ```
 
 ### Clone & Build
@@ -138,20 +138,24 @@ rustup target add wasm32-unknown-unknown
 ```bash
 git clone https://github.com/Velox-lab/velox-contracts.git
 cd velox-contracts
-cargo build
+cargo build --target wasm32v1-none --release
 ```
 
 ### Run Tests
 
+The `StreamFactory` tests deploy the real `PaymentStream`, `RecurringPayment`
+and `VeloxRegistry` WASM, so build it before running the tests:
+
 ```bash
+cargo build --target wasm32v1-none --release
 cargo test
 ```
 
 ### Deploy to Testnet
 
 ```bash
-soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/payment_stream.wasm \
+stellar contract deploy \
+  --wasm target/wasm32v1-none/release/payment_stream.wasm \
   --network testnet \
   --source <your-testnet-account>
 ```

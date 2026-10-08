@@ -1,5 +1,66 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env};
+use soroban_sdk::{
+    contract, contractclient, contractimpl, contracttype, Address, Bytes, BytesN, Env,
+};
+
+// ── Cross-contract interfaces ────────────────────────────────────────────────
+//
+// Declared locally rather than depending on the other contract crates, so the
+// factory WASM does not link in their exported functions. Signatures and types
+// must match the deployed contracts exactly.
+
+#[contractclient(name = "PaymentStreamClient")]
+pub trait PaymentStreamInterface {
+    fn initialize(
+        env: Env,
+        sender: Address,
+        recipient: Address,
+        token: Address,
+        rate_per_second: i128,
+        start_time: u64,
+        end_time: u64,
+        total_funded: i128,
+    );
+}
+
+#[contractclient(name = "RecurringPaymentClient")]
+pub trait RecurringPaymentInterface {
+    fn initialize(
+        env: Env,
+        sender: Address,
+        recipient: Address,
+        token: Address,
+        amount: i128,
+        interval: u64,
+        first_payment_time: u64,
+    );
+}
+
+#[contractclient(name = "VeloxRegistryClient")]
+pub trait VeloxRegistryInterface {
+    fn register_stream(env: Env, entry: StreamEntry);
+    fn register_schedule(env: Env, entry: ScheduleEntry);
+}
+
+/// Mirror of VeloxRegistry's StreamEntry.
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamEntry {
+    pub stream_id: Address,
+    pub sender: Address,
+    pub recipient: Address,
+    pub registered_at: u64,
+}
+
+/// Mirror of VeloxRegistry's ScheduleEntry.
+#[contracttype]
+#[derive(Clone)]
+pub struct ScheduleEntry {
+    pub schedule_id: Address,
+    pub sender: Address,
+    pub recipient: Address,
+    pub registered_at: u64,
+}
 
 // ── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -38,7 +99,8 @@ impl StreamFactory {
         storage.set(&FactoryKey::ScheduleWasm, &schedule_wasm_hash);
     }
 
-    /// Deploy a new PaymentStream contract instance and register it in VeloxRegistry.
+    /// Deploy a new PaymentStream contract instance, initialize it (which escrows
+    /// `total_funded` from the sender), and register it in VeloxRegistry.
     /// Returns the new stream's contract address.
     pub fn create_stream(
         env: Env,
@@ -66,17 +128,33 @@ impl StreamFactory {
         let stream_address = env
             .deployer()
             .with_current_contract(Self::next_deploy_salt(&env))
-            .deploy(wasm_hash);
+            .deploy_v2(wasm_hash, ());
 
-        // TODO: invoke PaymentStream.initialize on the deployed instance
-        // This will be wired up once cross-contract call patterns are finalised
-        // by contributors — see open issue: "Wire StreamFactory → PaymentStream init"
+        PaymentStreamClient::new(&env, &stream_address).initialize(
+            &sender,
+            &recipient,
+            &token,
+            &rate_per_second,
+            &start_time,
+            &end_time,
+            &total_funded,
+        );
+
+        Self::registry_client(&env).register_stream(&StreamEntry {
+            stream_id: stream_address.clone(),
+            sender,
+            recipient,
+            registered_at: env.ledger().timestamp(),
+        });
 
         stream_address
     }
 
-    /// Deploy a new RecurringPayment contract instance and register it.
-    /// Returns the new schedule's contract address.
+    /// Deploy a new RecurringPayment contract instance, initialize it, and
+    /// register it in VeloxRegistry. Returns the new schedule's contract address.
+    ///
+    /// Payments are pulled from the sender's allowance, so the sender must
+    /// separately `approve` the returned schedule address on the token.
     pub fn create_schedule(
         env: Env,
         sender: Address,
@@ -100,10 +178,23 @@ impl StreamFactory {
         let schedule_address = env
             .deployer()
             .with_current_contract(Self::next_deploy_salt(&env))
-            .deploy(wasm_hash);
+            .deploy_v2(wasm_hash, ());
 
-        // TODO: invoke RecurringPayment.initialize on the deployed instance
-        // See open issue: "Wire StreamFactory → RecurringPayment init"
+        RecurringPaymentClient::new(&env, &schedule_address).initialize(
+            &sender,
+            &recipient,
+            &token,
+            &amount,
+            &interval,
+            &first_payment_time,
+        );
+
+        Self::registry_client(&env).register_schedule(&ScheduleEntry {
+            schedule_id: schedule_address.clone(),
+            sender,
+            recipient,
+            registered_at: env.ledger().timestamp(),
+        });
 
         schedule_address
     }
@@ -133,6 +224,12 @@ impl StreamFactory {
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// Client for the VeloxRegistry configured at initialization.
+    fn registry_client(env: &Env) -> VeloxRegistryClient<'_> {
+        let registry: Address = env.storage().persistent().get(&FactoryKey::Registry).unwrap();
+        VeloxRegistryClient::new(env, &registry)
+    }
 
     /// Derive a unique deployment salt from an incrementing nonce.
     /// Guarantees every deployed instance gets a distinct contract address.

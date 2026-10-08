@@ -2,11 +2,65 @@
 mod tests {
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
+        token::{StellarAssetClient, TokenClient},
         Address, BytesN, Env,
     };
     use crate::{StreamFactory, StreamFactoryClient};
 
+    // Real contract WASM, so the factory can deploy instances by hash.
+    // Build first with: cargo build --target wasm32v1-none --release
+    mod payment_stream_wasm {
+        soroban_sdk::contractimport!(
+            file = "../../target/wasm32v1-none/release/payment_stream.wasm"
+        );
+    }
+    mod recurring_payment_wasm {
+        soroban_sdk::contractimport!(
+            file = "../../target/wasm32v1-none/release/recurring_payment.wasm"
+        );
+    }
+    mod registry_wasm {
+        soroban_sdk::contractimport!(
+            file = "../../target/wasm32v1-none/release/velox_registry.wasm"
+        );
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// A factory wired to a real registry and real stream/schedule WASM,
+    /// plus a token with 10_000 minted to the returned sender.
+    struct Deployed<'a> {
+        factory: StreamFactoryClient<'a>,
+        registry: registry_wasm::Client<'a>,
+        token: Address,
+        sender: Address,
+        recipient: Address,
+    }
+
+    fn setup_deployed_factory(env: &Env) -> Deployed<'_> {
+        env.mock_all_auths();
+
+        let registry_id = env.register(registry_wasm::WASM, ());
+        let stream_hash = env.deployer().upload_contract_wasm(payment_stream_wasm::WASM);
+        let schedule_hash = env.deployer().upload_contract_wasm(recurring_payment_wasm::WASM);
+
+        let factory = StreamFactoryClient::new(env, &env.register(StreamFactory, ()));
+        factory.initialize(&Address::generate(env), &registry_id, &stream_hash, &schedule_hash);
+
+        let sender = Address::generate(env);
+        let token = env
+            .register_stellar_asset_contract_v2(Address::generate(env))
+            .address();
+        StellarAssetClient::new(env, &token).mint(&sender, &10_000);
+
+        Deployed {
+            factory,
+            registry: registry_wasm::Client::new(env, &registry_id),
+            token,
+            sender,
+            recipient: Address::generate(env),
+        }
+    }
 
     fn create_env() -> Env {
         Env::default()
@@ -200,5 +254,151 @@ mod tests {
         env.mock_all_auths();
         client.set_stream_wasm(&new_hash);
         // No panic = success; hash is stored (no getter needed in tests)
+    }
+
+    // ── create_stream deployment ──────────────────────────────────────────────
+
+    #[test]
+    fn create_stream_initializes_deployed_stream() {
+        let env = create_env();
+        let d = setup_deployed_factory(&env);
+        env.ledger().with_mut(|li| li.timestamp = 1000);
+
+        let stream_id = d.factory.create_stream(
+            &d.sender, &d.recipient, &d.token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+        );
+
+        let info = payment_stream_wasm::Client::new(&env, &stream_id).get_stream_info();
+        assert_eq!(info.sender, d.sender);
+        assert_eq!(info.recipient, d.recipient);
+        assert_eq!(info.token, d.token);
+        assert_eq!(info.rate_per_second, 10);
+        assert_eq!(info.start_time, 1000);
+        assert_eq!(info.end_time, 1100);
+        assert_eq!(info.total_funded, 1000);
+        assert_eq!(info.total_withdrawn, 0);
+        assert_eq!(info.status, payment_stream_wasm::StreamStatus::Active);
+
+        // Funds moved from the sender into the stream's escrow
+        let token = TokenClient::new(&env, &d.token);
+        assert_eq!(token.balance(&stream_id), 1000);
+        assert_eq!(token.balance(&d.sender), 9000);
+    }
+
+    #[test]
+    fn create_stream_registers_stream_in_registry() {
+        let env = create_env();
+        let d = setup_deployed_factory(&env);
+        env.ledger().with_mut(|li| li.timestamp = 1000);
+
+        let stream_id = d.factory.create_stream(
+            &d.sender, &d.recipient, &d.token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+        );
+
+        let all = d.registry.get_all_streams();
+        assert_eq!(all.len(), 1);
+        let entry = all.get(0).unwrap();
+        assert_eq!(entry.stream_id, stream_id);
+        assert_eq!(entry.sender, d.sender);
+        assert_eq!(entry.recipient, d.recipient);
+        assert_eq!(entry.registered_at, 1000);
+
+        assert_eq!(d.registry.list_streams_by_sender(&d.sender).len(), 1);
+        assert_eq!(d.registry.list_streams_by_recipient(&d.recipient).len(), 1);
+    }
+
+    #[test]
+    fn create_stream_deploys_each_stream_at_a_distinct_address() {
+        let env = create_env();
+        let d = setup_deployed_factory(&env);
+        env.ledger().with_mut(|li| li.timestamp = 1000);
+
+        // Identical parameters must still produce two separate streams
+        let first = d.factory.create_stream(
+            &d.sender, &d.recipient, &d.token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+        );
+        let second = d.factory.create_stream(
+            &d.sender, &d.recipient, &d.token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+        );
+
+        assert_ne!(first, second);
+        assert_eq!(d.registry.get_all_streams().len(), 2);
+    }
+
+    #[test]
+    fn stream_created_by_factory_can_be_withdrawn_from() {
+        let env = create_env();
+        let d = setup_deployed_factory(&env);
+        env.ledger().with_mut(|li| li.timestamp = 1000);
+
+        let stream_id = d.factory.create_stream(
+            &d.sender, &d.recipient, &d.token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+        );
+
+        env.ledger().with_mut(|li| li.timestamp = 1050);
+        payment_stream_wasm::Client::new(&env, &stream_id).withdraw();
+
+        assert_eq!(TokenClient::new(&env, &d.token).balance(&d.recipient), 500);
+    }
+
+    // ── create_schedule deployment ────────────────────────────────────────────
+
+    #[test]
+    fn create_schedule_initializes_deployed_schedule() {
+        let env = create_env();
+        let d = setup_deployed_factory(&env);
+        env.ledger().with_mut(|li| li.timestamp = 1_000_000);
+
+        let schedule_id = d.factory.create_schedule(
+            &d.sender, &d.recipient, &d.token, &100_i128, &604_800_u64, &1_604_800_u64,
+        );
+
+        let info = recurring_payment_wasm::Client::new(&env, &schedule_id).get_schedule_info();
+        assert_eq!(info.sender, d.sender);
+        assert_eq!(info.recipient, d.recipient);
+        assert_eq!(info.token, d.token);
+        assert_eq!(info.amount, 100);
+        assert_eq!(info.interval, 604_800);
+        assert_eq!(info.next_payment_time, 1_604_800);
+        assert_eq!(info.status, recurring_payment_wasm::ScheduleStatus::Active);
+    }
+
+    #[test]
+    fn create_schedule_registers_schedule_in_registry() {
+        let env = create_env();
+        let d = setup_deployed_factory(&env);
+        env.ledger().with_mut(|li| li.timestamp = 1_000_000);
+
+        let schedule_id = d.factory.create_schedule(
+            &d.sender, &d.recipient, &d.token, &100_i128, &604_800_u64, &1_604_800_u64,
+        );
+
+        let all = d.registry.get_all_schedules();
+        assert_eq!(all.len(), 1);
+        let entry = all.get(0).unwrap();
+        assert_eq!(entry.schedule_id, schedule_id);
+        assert_eq!(entry.sender, d.sender);
+        assert_eq!(entry.recipient, d.recipient);
+        assert_eq!(entry.registered_at, 1_000_000);
+    }
+
+    #[test]
+    fn schedule_created_by_factory_executes_after_approval() {
+        let env = create_env();
+        let d = setup_deployed_factory(&env);
+        env.ledger().with_mut(|li| li.timestamp = 1_000_000);
+
+        let schedule_id = d.factory.create_schedule(
+            &d.sender, &d.recipient, &d.token, &100_i128, &604_800_u64, &1_604_800_u64,
+        );
+
+        let token = TokenClient::new(&env, &d.token);
+        let expiration_ledger = env.ledger().sequence() + 100_000;
+        token.approve(&d.sender, &schedule_id, &1_000, &expiration_ledger);
+
+        env.ledger().with_mut(|li| li.timestamp = 1_604_800);
+        recurring_payment_wasm::Client::new(&env, &schedule_id).execute_payment();
+
+        assert_eq!(token.balance(&d.recipient), 100);
     }
 }
