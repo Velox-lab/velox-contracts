@@ -53,8 +53,8 @@ Handles fixed-interval recurring payments (e.g., weekly payroll, monthly subscri
 ### `VeloxRegistry`
 A lightweight on-chain registry that indexes all active streams and schedules for discoverability.
 
-- `register_stream(stream_id, metadata)`
-- `register_schedule(schedule_id, metadata)`
+- `register_stream(entry)` — factory only
+- `register_schedule(entry)` — factory only
 - `get_all_active()`
 
 ---

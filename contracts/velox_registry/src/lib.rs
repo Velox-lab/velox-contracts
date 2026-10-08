@@ -9,6 +9,8 @@ pub enum RegistryKey {
     Schedule(Address),
     AllStreams,
     AllSchedules,
+    Admin,   // Address allowed to set the factory
+    Factory, // The only address allowed to register entries
 }
 
 // ── Data Types ───────────────────────────────────────────────────────────────
@@ -38,10 +40,29 @@ pub struct VeloxRegistry;
 
 #[contractimpl]
 impl VeloxRegistry {
+    /// Set the admin at deployment. Running as a constructor means no one can
+    /// front-run initialization between deploy and setup.
+    pub fn __constructor(env: Env, admin: Address) {
+        env.storage().persistent().set(&RegistryKey::Admin, &admin);
+    }
+
+    /// Admin sets the factory allowed to register entries.
+    /// The factory is deployed after the registry, so it cannot be a constructor argument.
+    pub fn set_factory(env: Env, factory: Address) {
+        let admin: Address = env.storage().persistent().get(&RegistryKey::Admin).unwrap();
+        admin.require_auth();
+        env.storage().persistent().set(&RegistryKey::Factory, &factory);
+    }
+
+    /// Returns the factory allowed to register entries, if one is set.
+    pub fn get_factory(env: Env) -> Option<Address> {
+        env.storage().persistent().get(&RegistryKey::Factory)
+    }
+
     /// Register a new payment stream in the registry.
-    /// Only callable by an authorised factory contract.
+    /// Only callable by the configured factory contract.
     pub fn register_stream(env: Env, entry: StreamEntry) {
-        entry.sender.require_auth();
+        Self::require_factory(&env);
 
         let mut streams: Vec<StreamEntry> = env
             .storage()
@@ -61,8 +82,9 @@ impl VeloxRegistry {
     }
 
     /// Register a new recurring payment schedule in the registry.
+    /// Only callable by the configured factory contract.
     pub fn register_schedule(env: Env, entry: ScheduleEntry) {
-        entry.sender.require_auth();
+        Self::require_factory(&env);
 
         let mut schedules: Vec<ScheduleEntry> = env
             .storage()
@@ -145,6 +167,18 @@ impl VeloxRegistry {
             }
         }
         result
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// Panic unless the call is authorized by the configured factory.
+    fn require_factory(env: &Env) {
+        let factory: Address = env
+            .storage()
+            .persistent()
+            .get(&RegistryKey::Factory)
+            .expect("factory not set");
+        factory.require_auth();
     }
 }
 

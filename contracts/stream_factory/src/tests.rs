@@ -40,12 +40,14 @@ mod tests {
     fn setup_deployed_factory(env: &Env) -> Deployed<'_> {
         env.mock_all_auths();
 
-        let registry_id = env.register(registry_wasm::WASM, ());
+        let registry_id = env.register(registry_wasm::WASM, (Address::generate(env),));
+        let registry = registry_wasm::Client::new(env, &registry_id);
         let stream_hash = env.deployer().upload_contract_wasm(payment_stream_wasm::WASM);
         let schedule_hash = env.deployer().upload_contract_wasm(recurring_payment_wasm::WASM);
 
         let factory = StreamFactoryClient::new(env, &env.register(StreamFactory, ()));
         factory.initialize(&Address::generate(env), &registry_id, &stream_hash, &schedule_hash);
+        registry.set_factory(&factory.address);
 
         let sender = Address::generate(env);
         let token = env
@@ -55,7 +57,7 @@ mod tests {
 
         Deployed {
             factory,
-            registry: registry_wasm::Client::new(env, &registry_id),
+            registry,
             token,
             sender,
             recipient: Address::generate(env),
