@@ -13,7 +13,7 @@ mod tests {
     }
 
     fn register_contract(env: &Env) -> Address {
-        env.register_contract(None, StreamFactory)
+        env.register(StreamFactory, ())
     }
 
     fn dummy_wasm_hash(env: &Env) -> BytesN<32> {

@@ -8,7 +8,7 @@ mod tests {
     }
 
     fn register_contract(env: &Env) -> Address {
-        env.register_contract(None, VeloxRegistry)
+        env.register(VeloxRegistry, ())
     }
 
     // ── register_stream ──────────────────────────────────────────────────────
