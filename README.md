@@ -1,5 +1,7 @@
 # velox-contracts
 
+[![CI](https://github.com/Velox-lab/velox-contracts/actions/workflows/ci.yml/badge.svg)](https://github.com/Velox-lab/velox-contracts/actions/workflows/ci.yml)
+
 > Soroban smart contracts powering streaming and recurring payments on the Stellar network.
 
 ---
