@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use soroban_sdk::{
-        testutils::{Address as _, Ledger},
+        testutils::{Address as _, Events, Ledger},
         token::StellarAssetClient,
         Address, Env,
     };
@@ -311,5 +311,66 @@ mod tests {
 
         env.mock_all_auths();
         client.top_up(&0_i128);
+    }
+
+    // ── Events ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn initialize_emits_stream_created_event() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        setup_stream(&env, &client);
+
+        let contract_events = env.events().all().filter_by_contract(&contract_id);
+        assert!(!contract_events.events().is_empty(), "StreamCreated event must be emitted");
+    }
+
+    #[test]
+    fn withdraw_emits_withdrawn_event() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        setup_stream(&env, &client);
+
+        env.ledger().with_mut(|li| li.timestamp = 1050);
+        env.mock_all_auths();
+        client.withdraw();
+
+        let contract_events = env.events().all().filter_by_contract(&contract_id);
+        assert_eq!(contract_events.events().len(), 1, "Withdrawn event must be emitted");
+    }
+
+    #[test]
+    fn cancel_emits_stream_cancelled_event() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        setup_stream(&env, &client);
+
+        env.ledger().with_mut(|li| li.timestamp = 1050);
+        env.mock_all_auths();
+        client.cancel();
+
+        let contract_events = env.events().all().filter_by_contract(&contract_id);
+        assert_eq!(contract_events.events().len(), 1, "StreamCancelled event must be emitted");
+    }
+
+    #[test]
+    fn top_up_emits_topped_up_event() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        setup_stream(&env, &client);
+
+        env.mock_all_auths();
+        client.top_up(&500_i128);
+
+        let contract_events = env.events().all().filter_by_contract(&contract_id);
+        assert_eq!(contract_events.events().len(), 1, "ToppedUp event must be emitted");
     }
 }

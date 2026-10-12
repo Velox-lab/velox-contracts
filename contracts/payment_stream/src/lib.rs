@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, Symbol};
 
 // ── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -40,6 +40,29 @@ pub struct StreamInfo {
     pub total_funded: i128,
     pub total_withdrawn: i128,
     pub status: StreamStatus,
+}
+
+// ── Events ────────────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct StreamCreatedEvent {
+    pub sender: Address,
+    pub recipient: Address,
+    pub token: Address,
+    pub rate_per_second: i128,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub total_funded: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct StreamCancelledEvent {
+    pub sender: Address,
+    pub recipient: Address,
+    pub paid_to_recipient: i128,
+    pub refunded_to_sender: i128,
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -89,6 +112,20 @@ impl PaymentStream {
         // Transfer funded tokens from sender into this contract
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&sender, &env.current_contract_address(), &total_funded);
+
+        // Emit StreamCreated event
+        env.events().publish(
+            (Symbol::new(&env, "StreamCreated"), sender.clone(), recipient.clone()),
+            StreamCreatedEvent {
+                sender,
+                recipient,
+                token,
+                rate_per_second,
+                start_time,
+                end_time,
+                total_funded,
+            },
+        );
     }
 
     /// Recipient withdraws all currently claimable tokens.
@@ -110,6 +147,12 @@ impl PaymentStream {
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&env.current_contract_address(), &recipient, &claimable);
 
+        // Emit Withdrawn(amount) event
+        env.events().publish(
+            (Symbol::new(&env, "Withdrawn"), recipient),
+            claimable,
+        );
+
         Self::mark_completed_if_finished(&env);
     }
 
@@ -120,12 +163,25 @@ impl PaymentStream {
         sender.require_auth();
 
         Self::assert_stream_is_active(&env);
-        Self::pay_out_earned_balance(&env);
-        Self::return_remaining_to_sender(&env);
+        let earned = Self::pay_out_earned_balance(&env);
+        let refunded = Self::return_remaining_to_sender(&env);
 
         env.storage()
             .persistent()
             .set(&StreamKey::Status, &StreamStatus::Cancelled);
+
+        let recipient: Address = env.storage().persistent().get(&StreamKey::Recipient).unwrap();
+
+        // Emit StreamCancelled event
+        env.events().publish(
+            (Symbol::new(&env, "StreamCancelled"), sender.clone()),
+            StreamCancelledEvent {
+                sender,
+                recipient,
+                paid_to_recipient: earned,
+                refunded_to_sender: refunded,
+            },
+        );
     }
 
     /// Sender tops up the stream with additional tokens, extending its duration.
@@ -152,6 +208,12 @@ impl PaymentStream {
         env.storage()
             .persistent()
             .set(&StreamKey::EndTime, &(end_time + extra_seconds));
+
+        // Emit ToppedUp(amount) event
+        env.events().publish(
+            (Symbol::new(&env, "ToppedUp"), sender),
+            additional_amount,
+        );
     }
 
     /// Returns how many tokens the recipient can withdraw right now.
@@ -205,10 +267,10 @@ impl PaymentStream {
 
     /// Transfer any balance the recipient has earned up to this moment.
     /// Called during cancellation before returning funds to sender.
-    fn pay_out_earned_balance(env: &Env) {
+    fn pay_out_earned_balance(env: &Env) -> i128 {
         let claimable = Self::calculate_claimable_balance(env);
         if claimable <= 0 {
-            return;
+            return 0;
         }
 
         let recipient: Address = env.storage().persistent().get(&StreamKey::Recipient).unwrap();
@@ -221,23 +283,25 @@ impl PaymentStream {
 
         let token_client = token::Client::new(env, &token);
         token_client.transfer(&env.current_contract_address(), &recipient, &claimable);
+        claimable
     }
 
     /// Transfer all unstreamed tokens back to the sender.
     /// Called during cancellation after paying out the recipient's earned balance.
-    fn return_remaining_to_sender(env: &Env) {
+    fn return_remaining_to_sender(env: &Env) -> i128 {
         let total_funded: i128 = env.storage().persistent().get(&StreamKey::TotalFunded).unwrap();
         let total_withdrawn: i128 = env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap();
         let remaining = total_funded - total_withdrawn;
 
         if remaining <= 0 {
-            return;
+            return 0;
         }
 
         let sender: Address = env.storage().persistent().get(&StreamKey::Sender).unwrap();
         let token: Address = env.storage().persistent().get(&StreamKey::Token).unwrap();
         let token_client = token::Client::new(env, &token);
         token_client.transfer(&env.current_contract_address(), &sender, &remaining);
+        remaining
     }
 
     /// Calculate how many tokens are claimable at the current ledger timestamp.
