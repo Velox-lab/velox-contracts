@@ -5,7 +5,7 @@ mod tests {
         token::{StellarAssetClient, TokenClient},
         Address, Env,
     };
-    use crate::{RecurringPayment, RecurringPaymentClient, ScheduleStatus};
+    use crate::{Error, RecurringPayment, RecurringPaymentClient, ScheduleStatus};
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -88,7 +88,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "amount must be greater than zero")]
+    #[should_panic(expected = "Error(Contract, #2)")]
     fn initialize_panics_when_amount_is_zero() {
         let env = create_env();
         let contract_id = register_contract(&env);
@@ -104,7 +104,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "interval must be greater than zero")]
+    #[should_panic(expected = "Error(Contract, #3)")]
     fn initialize_panics_when_interval_is_zero() {
         let env = create_env();
         let contract_id = register_contract(&env);
@@ -117,6 +117,40 @@ mod tests {
         env.mock_all_auths();
         env.ledger().with_mut(|li| li.timestamp = 1_000_000);
         client.initialize(&sender, &recipient, &token, &100, &0_u64, &1_604_800_u64);
+    }
+
+    #[test]
+    fn initialize_returns_typed_error_when_amount_is_zero() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = RecurringPaymentClient::new(&env, &contract_id);
+
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| li.timestamp = 1_000_000);
+        let result = client.try_initialize(&sender, &recipient, &token, &0, &604_800_u64, &1_604_800_u64);
+
+        assert_eq!(result, Err(Ok(Error::AmountMustBePositive)));
+    }
+
+    #[test]
+    fn initialize_returns_typed_error_when_first_payment_is_in_the_past() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = RecurringPaymentClient::new(&env, &contract_id);
+
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        env.mock_all_auths();
+        env.ledger().with_mut(|li| li.timestamp = 1_000_000);
+        let result = client.try_initialize(&sender, &recipient, &token, &100, &604_800_u64, &999_999_u64);
+
+        assert_eq!(result, Err(Ok(Error::FirstPaymentInPast)));
     }
 
     // ── execute_payment ───────────────────────────────────────────────────────
@@ -139,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "already initialized")]
+    #[should_panic(expected = "Error(Contract, #1)")]
     fn initialize_panics_when_called_twice() {
         let env = create_env();
         let contract_id = register_contract(&env);
@@ -189,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "payment is not due yet")]
+    #[should_panic(expected = "Error(Contract, #6)")]
     fn execute_payment_panics_before_due_time() {
         let env = create_env();
         let contract_id = register_contract(&env);
@@ -201,6 +235,21 @@ mod tests {
         env.ledger().with_mut(|li| li.timestamp = 1_000_001);
         env.mock_all_auths();
         client.execute_payment();
+    }
+
+    #[test]
+    fn execute_payment_returns_typed_error_before_due_time() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = RecurringPaymentClient::new(&env, &contract_id);
+
+        setup_schedule(&env, &client);
+
+        env.ledger().with_mut(|li| li.timestamp = 1_000_001);
+        env.mock_all_auths();
+        let result = client.try_execute_payment();
+
+        assert_eq!(result, Err(Ok(Error::PaymentNotDue)));
     }
 
     // ── get_schedule_info ─────────────────────────────────────────────────────
@@ -254,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "schedule is not active")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn cancel_panics_on_already_cancelled_schedule() {
         let env = create_env();
         let contract_id = register_contract(&env);
@@ -268,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "schedule is not active")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn execute_payment_panics_on_cancelled_schedule() {
         let env = create_env();
         let contract_id = register_contract(&env);
