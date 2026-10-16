@@ -1,5 +1,19 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, Env};
+
+// ── Errors ────────────────────────────────────────────────────────────────────
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum Error {
+    AlreadyInitialized = 1,
+    AmountMustBePositive = 2,
+    IntervalMustBePositive = 3,
+    FirstPaymentInPast = 4,
+    ScheduleNotActive = 5,
+    PaymentNotDue = 6,
+}
 
 // ── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -58,19 +72,21 @@ impl RecurringPayment {
         amount: i128,
         interval: u64,
         first_payment_time: u64,
-    ) {
+    ) -> Result<(), Error> {
         sender.require_auth();
 
-        assert!(
-            !env.storage().persistent().has(&ScheduleKey::Status),
-            "already initialized"
-        );
-        assert!(amount > 0, "amount must be greater than zero");
-        assert!(interval > 0, "interval must be greater than zero");
-        assert!(
-            first_payment_time >= env.ledger().timestamp(),
-            "first payment time must be in the future"
-        );
+        if env.storage().persistent().has(&ScheduleKey::Status) {
+            return Err(Error::AlreadyInitialized);
+        }
+        if amount <= 0 {
+            return Err(Error::AmountMustBePositive);
+        }
+        if interval == 0 {
+            return Err(Error::IntervalMustBePositive);
+        }
+        if first_payment_time < env.ledger().timestamp() {
+            return Err(Error::FirstPaymentInPast);
+        }
 
         let storage = env.storage().persistent();
         storage.set(&ScheduleKey::Sender, &sender);
@@ -80,6 +96,7 @@ impl RecurringPayment {
         storage.set(&ScheduleKey::Interval, &interval);
         storage.set(&ScheduleKey::NextPaymentTime, &first_payment_time);
         storage.set(&ScheduleKey::Status, &ScheduleStatus::Active);
+        Ok(())
     }
 
     /// Execute a single scheduled payment.
@@ -88,8 +105,8 @@ impl RecurringPayment {
     ///
     /// Permissionless: no signature is required because the call can only move the
     /// fixed amount, to the fixed recipient, once per interval.
-    pub fn execute_payment(env: Env) {
-        Self::assert_schedule_is_active(&env);
+    pub fn execute_payment(env: Env) -> Result<(), Error> {
+        Self::assert_schedule_is_active(&env)?;
 
         let now = env.ledger().timestamp();
         let next_payment_time: u64 = env
@@ -98,7 +115,9 @@ impl RecurringPayment {
             .get(&ScheduleKey::NextPaymentTime)
             .unwrap();
 
-        assert!(now >= next_payment_time, "payment is not due yet");
+        if now < next_payment_time {
+            return Err(Error::PaymentNotDue);
+        }
 
         let sender: Address = env.storage().persistent().get(&ScheduleKey::Sender).unwrap();
         let recipient: Address = env
@@ -117,18 +136,20 @@ impl RecurringPayment {
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(&env.current_contract_address(), &sender, &recipient, &amount);
+        Ok(())
     }
 
     /// Sender cancels the recurring schedule. No further payments will be made.
-    pub fn cancel(env: Env) {
+    pub fn cancel(env: Env) -> Result<(), Error> {
         let sender: Address = env.storage().persistent().get(&ScheduleKey::Sender).unwrap();
         sender.require_auth();
 
-        Self::assert_schedule_is_active(&env);
+        Self::assert_schedule_is_active(&env)?;
 
         env.storage()
             .persistent()
             .set(&ScheduleKey::Status, &ScheduleStatus::Cancelled);
+        Ok(())
     }
 
     /// Returns the timestamp of the next scheduled payment.
@@ -173,14 +194,17 @@ impl RecurringPayment {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    /// Panic if the schedule is not in Active status.
-    fn assert_schedule_is_active(env: &Env) {
+    /// Return an error if the schedule is not in Active status.
+    fn assert_schedule_is_active(env: &Env) -> Result<(), Error> {
         let status: ScheduleStatus = env
             .storage()
             .persistent()
             .get(&ScheduleKey::Status)
             .unwrap();
-        assert!(status == ScheduleStatus::Active, "schedule is not active");
+        if status != ScheduleStatus::Active {
+            return Err(Error::ScheduleNotActive);
+        }
+        Ok(())
     }
 }
 
