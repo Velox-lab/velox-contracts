@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use soroban_sdk::{
-        testutils::{Address as _, Ledger},
+        testutils::{Address as _, Events, Ledger},
         token::StellarAssetClient,
         Address, Env,
     };
@@ -311,5 +311,129 @@ mod tests {
 
         env.mock_all_auths();
         client.top_up(&0_i128);
+    }
+
+    // ── Events ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn initialize_emits_stream_created_event() {
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        use soroban_sdk::{vec, IntoVal, Symbol};
+        use crate::StreamCreatedEvent;
+
+        let (sender, recipient, token) = setup_stream(&env, &client);
+
+        let contract_events = env.events().all().filter_by_contract(&contract_id);
+        assert_eq!(
+            contract_events,
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "StreamCreated"), sender.clone(), recipient.clone()).into_val(&env),
+                    StreamCreatedEvent {
+                        sender,
+                        recipient,
+                        token,
+                        rate_per_second: 10_i128,
+                        start_time: 1000_u64,
+                        end_time: 1100_u64,
+                        total_funded: 1000_i128,
+                    }.into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn withdraw_emits_withdrawn_event() {
+        use soroban_sdk::{vec, IntoVal, Symbol};
+
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        let (_sender, recipient, _token) = setup_stream(&env, &client);
+
+        env.ledger().with_mut(|li| li.timestamp = 1050);
+        env.mock_all_auths();
+        client.withdraw();
+
+        let contract_events = env.events().all().filter_by_contract(&contract_id);
+        assert_eq!(
+            contract_events,
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "Withdrawn"), recipient).into_val(&env),
+                    500_i128.into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn cancel_emits_stream_cancelled_event() {
+        use soroban_sdk::{vec, IntoVal, Symbol};
+        use crate::StreamCancelledEvent;
+
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        let (sender, recipient, _token) = setup_stream(&env, &client);
+
+        env.ledger().with_mut(|li| li.timestamp = 1050);
+        env.mock_all_auths();
+        client.cancel();
+
+        let contract_events = env.events().all().filter_by_contract(&contract_id);
+        assert_eq!(
+            contract_events,
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "StreamCancelled"), sender.clone()).into_val(&env),
+                    StreamCancelledEvent {
+                        sender,
+                        recipient,
+                        paid_to_recipient: 500_i128,
+                        refunded_to_sender: 500_i128,
+                    }.into_val(&env),
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn top_up_emits_topped_up_event() {
+        use soroban_sdk::{vec, IntoVal, Symbol};
+
+        let env = create_env();
+        let contract_id = register_contract(&env);
+        let client = PaymentStreamClient::new(&env, &contract_id);
+
+        let (sender, _recipient, _token) = setup_stream(&env, &client);
+
+        env.mock_all_auths();
+        client.top_up(&500_i128);
+
+        let contract_events = env.events().all().filter_by_contract(&contract_id);
+        assert_eq!(
+            contract_events,
+            vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    (Symbol::new(&env, "ToppedUp"), sender).into_val(&env),
+                    500_i128.into_val(&env),
+                )
+            ]
+        );
     }
 }
