@@ -11,6 +11,9 @@ use soroban_sdk::{
 
 #[contractclient(name = "PaymentStreamClient")]
 pub trait PaymentStreamInterface {
+    // Mirrors PaymentStream::initialize's signature exactly; see its own
+    // #[allow(clippy::too_many_arguments)] for why.
+    #[allow(clippy::too_many_arguments)]
     fn initialize(
         env: Env,
         sender: Address,
@@ -102,6 +105,8 @@ impl StreamFactory {
     /// Deploy a new PaymentStream contract instance, initialize it (which escrows
     /// `total_funded` from the sender), and register it in VeloxRegistry.
     /// Returns the new stream's contract address.
+    // Same parameters as PaymentStream::initialize, forwarded as-is.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_stream(
         env: Env,
         sender: Address,

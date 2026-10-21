@@ -1,263 +1,260 @@
-#[cfg(test)]
-mod tests {
-    use crate::{ScheduleEntry, StreamEntry, VeloxRegistry, VeloxRegistryClient};
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+use crate::{ScheduleEntry, StreamEntry, VeloxRegistry, VeloxRegistryClient};
+use soroban_sdk::{testutils::Address as _, Address, Env};
 
-    fn create_env() -> Env {
-        Env::default()
+fn create_env() -> Env {
+    Env::default()
+}
+
+/// Deploys the registry with a generated admin and a generated factory set.
+fn register_contract(env: &Env) -> Address {
+    let contract_id = env.register(VeloxRegistry, (Address::generate(env),));
+    env.mock_all_auths();
+    VeloxRegistryClient::new(env, &contract_id).set_factory(&Address::generate(env));
+    contract_id
+}
+
+fn sample_stream_entry(env: &Env) -> StreamEntry {
+    StreamEntry {
+        stream_id: Address::generate(env),
+        sender: Address::generate(env),
+        recipient: Address::generate(env),
+        registered_at: 1000,
     }
+}
 
-    /// Deploys the registry with a generated admin and a generated factory set.
-    fn register_contract(env: &Env) -> Address {
-        let contract_id = env.register(VeloxRegistry, (Address::generate(env),));
-        env.mock_all_auths();
-        VeloxRegistryClient::new(env, &contract_id).set_factory(&Address::generate(env));
-        contract_id
-    }
+// ── access control ───────────────────────────────────────────────────────
 
-    fn sample_stream_entry(env: &Env) -> StreamEntry {
-        StreamEntry {
-            stream_id: Address::generate(env),
-            sender: Address::generate(env),
-            recipient: Address::generate(env),
-            registered_at: 1000,
-        }
-    }
+#[test]
+fn set_factory_stores_factory_address() {
+    let env = create_env();
+    let contract_id = env.register(VeloxRegistry, (Address::generate(&env),));
+    let client = VeloxRegistryClient::new(&env, &contract_id);
+    let factory = Address::generate(&env);
 
-    // ── access control ───────────────────────────────────────────────────────
+    assert_eq!(client.get_factory(), None);
+    env.mock_all_auths();
+    client.set_factory(&factory);
 
-    #[test]
-    fn set_factory_stores_factory_address() {
-        let env = create_env();
-        let contract_id = env.register(VeloxRegistry, (Address::generate(&env),));
-        let client = VeloxRegistryClient::new(&env, &contract_id);
-        let factory = Address::generate(&env);
+    assert_eq!(client.get_factory(), Some(factory));
+}
 
-        assert_eq!(client.get_factory(), None);
-        env.mock_all_auths();
-        client.set_factory(&factory);
+#[test]
+#[should_panic]
+fn set_factory_panics_without_admin_auth() {
+    let env = create_env();
+    let contract_id = env.register(VeloxRegistry, (Address::generate(&env),));
+    let client = VeloxRegistryClient::new(&env, &contract_id);
 
-        assert_eq!(client.get_factory(), Some(factory));
-    }
+    // No auths mocked: the admin has not signed
+    client.set_factory(&Address::generate(&env));
+}
 
-    #[test]
-    #[should_panic]
-    fn set_factory_panics_without_admin_auth() {
-        let env = create_env();
-        let contract_id = env.register(VeloxRegistry, (Address::generate(&env),));
-        let client = VeloxRegistryClient::new(&env, &contract_id);
+#[test]
+#[should_panic(expected = "factory not set")]
+fn register_stream_panics_when_factory_not_set() {
+    let env = create_env();
+    let contract_id = env.register(VeloxRegistry, (Address::generate(&env),));
+    let client = VeloxRegistryClient::new(&env, &contract_id);
 
-        // No auths mocked: the admin has not signed
-        client.set_factory(&Address::generate(&env));
-    }
+    env.mock_all_auths();
+    client.register_stream(&sample_stream_entry(&env));
+}
 
-    #[test]
-    #[should_panic(expected = "factory not set")]
-    fn register_stream_panics_when_factory_not_set() {
-        let env = create_env();
-        let contract_id = env.register(VeloxRegistry, (Address::generate(&env),));
-        let client = VeloxRegistryClient::new(&env, &contract_id);
+#[test]
+#[should_panic]
+fn register_stream_panics_without_factory_auth() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = VeloxRegistryClient::new(&env, &contract_id);
 
-        env.mock_all_auths();
-        client.register_stream(&sample_stream_entry(&env));
-    }
+    // Clear mocked auths: an arbitrary caller cannot write entries
+    env.set_auths(&[]);
+    client.register_stream(&sample_stream_entry(&env));
+}
 
-    #[test]
-    #[should_panic]
-    fn register_stream_panics_without_factory_auth() {
-        let env = create_env();
-        let contract_id = register_contract(&env);
-        let client = VeloxRegistryClient::new(&env, &contract_id);
+// ── register_stream ──────────────────────────────────────────────────────
 
-        // Clear mocked auths: an arbitrary caller cannot write entries
-        env.set_auths(&[]);
-        client.register_stream(&sample_stream_entry(&env));
-    }
+#[test]
+fn register_stream_stores_entry() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = VeloxRegistryClient::new(&env, &contract_id);
 
-    // ── register_stream ──────────────────────────────────────────────────────
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let stream_id = Address::generate(&env);
 
-    #[test]
-    fn register_stream_stores_entry() {
-        let env = create_env();
-        let contract_id = register_contract(&env);
-        let client = VeloxRegistryClient::new(&env, &contract_id);
+    let entry = StreamEntry {
+        stream_id: stream_id.clone(),
+        sender: sender.clone(),
+        recipient: recipient.clone(),
+        registered_at: 1000,
+    };
 
-        let sender = Address::generate(&env);
-        let recipient = Address::generate(&env);
-        let stream_id = Address::generate(&env);
+    env.mock_all_auths();
+    client.register_stream(&entry);
 
+    let stored = client.get_stream(&stream_id).unwrap();
+    assert_eq!(stored.sender, sender);
+    assert_eq!(stored.recipient, recipient);
+}
+
+#[test]
+fn register_stream_appears_in_get_all_streams() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = VeloxRegistryClient::new(&env, &contract_id);
+
+    let entry = StreamEntry {
+        stream_id: Address::generate(&env),
+        sender: Address::generate(&env),
+        recipient: Address::generate(&env),
+        registered_at: 1000,
+    };
+
+    env.mock_all_auths();
+    client.register_stream(&entry);
+
+    let all = client.get_all_streams();
+    assert_eq!(all.len(), 1);
+}
+
+#[test]
+fn multiple_streams_are_all_stored() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = VeloxRegistryClient::new(&env, &contract_id);
+
+    env.mock_all_auths();
+
+    for _ in 0..3 {
         let entry = StreamEntry {
-            stream_id: stream_id.clone(),
-            sender: sender.clone(),
-            recipient: recipient.clone(),
+            stream_id: Address::generate(&env),
+            sender: Address::generate(&env),
+            recipient: Address::generate(&env),
             registered_at: 1000,
         };
-
-        env.mock_all_auths();
         client.register_stream(&entry);
-
-        let stored = client.get_stream(&stream_id).unwrap();
-        assert_eq!(stored.sender, sender);
-        assert_eq!(stored.recipient, recipient);
     }
 
-    #[test]
-    fn register_stream_appears_in_get_all_streams() {
-        let env = create_env();
-        let contract_id = register_contract(&env);
-        let client = VeloxRegistryClient::new(&env, &contract_id);
+    assert_eq!(client.get_all_streams().len(), 3);
+}
 
-        let entry = StreamEntry {
-            stream_id: Address::generate(&env),
-            sender: Address::generate(&env),
-            recipient: Address::generate(&env),
-            registered_at: 1000,
-        };
+// ── list_streams_by_sender / list_streams_by_recipient ───────────────────
 
-        env.mock_all_auths();
-        client.register_stream(&entry);
+#[test]
+fn list_streams_by_sender_returns_only_matching_streams() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = VeloxRegistryClient::new(&env, &contract_id);
 
-        let all = client.get_all_streams();
-        assert_eq!(all.len(), 1);
-    }
+    let sender_a = Address::generate(&env);
+    let sender_b = Address::generate(&env);
 
-    #[test]
-    fn multiple_streams_are_all_stored() {
-        let env = create_env();
-        let contract_id = register_contract(&env);
-        let client = VeloxRegistryClient::new(&env, &contract_id);
+    env.mock_all_auths();
 
-        env.mock_all_auths();
+    client.register_stream(&StreamEntry {
+        stream_id: Address::generate(&env),
+        sender: sender_a.clone(),
+        recipient: Address::generate(&env),
+        registered_at: 1000,
+    });
+    client.register_stream(&StreamEntry {
+        stream_id: Address::generate(&env),
+        sender: sender_b.clone(),
+        recipient: Address::generate(&env),
+        registered_at: 1000,
+    });
+    client.register_stream(&StreamEntry {
+        stream_id: Address::generate(&env),
+        sender: sender_a.clone(),
+        recipient: Address::generate(&env),
+        registered_at: 1000,
+    });
 
-        for _ in 0..3 {
-            let entry = StreamEntry {
-                stream_id: Address::generate(&env),
-                sender: Address::generate(&env),
-                recipient: Address::generate(&env),
-                registered_at: 1000,
-            };
-            client.register_stream(&entry);
-        }
+    let result = client.list_streams_by_sender(&sender_a);
+    assert_eq!(result.len(), 2);
+}
 
-        assert_eq!(client.get_all_streams().len(), 3);
-    }
+#[test]
+fn list_streams_by_sender_returns_empty_for_unknown_sender() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = VeloxRegistryClient::new(&env, &contract_id);
 
-    // ── list_streams_by_sender / list_streams_by_recipient ───────────────────
+    let unknown = Address::generate(&env);
+    let result = client.list_streams_by_sender(&unknown);
+    assert_eq!(result.len(), 0);
+}
 
-    #[test]
-    fn list_streams_by_sender_returns_only_matching_streams() {
-        let env = create_env();
-        let contract_id = register_contract(&env);
-        let client = VeloxRegistryClient::new(&env, &contract_id);
+#[test]
+fn list_streams_by_recipient_returns_only_matching_streams() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = VeloxRegistryClient::new(&env, &contract_id);
 
-        let sender_a = Address::generate(&env);
-        let sender_b = Address::generate(&env);
+    let recipient_a = Address::generate(&env);
 
-        env.mock_all_auths();
+    env.mock_all_auths();
 
-        client.register_stream(&StreamEntry {
-            stream_id: Address::generate(&env),
-            sender: sender_a.clone(),
-            recipient: Address::generate(&env),
-            registered_at: 1000,
-        });
-        client.register_stream(&StreamEntry {
-            stream_id: Address::generate(&env),
-            sender: sender_b.clone(),
-            recipient: Address::generate(&env),
-            registered_at: 1000,
-        });
-        client.register_stream(&StreamEntry {
-            stream_id: Address::generate(&env),
-            sender: sender_a.clone(),
-            recipient: Address::generate(&env),
-            registered_at: 1000,
-        });
+    client.register_stream(&StreamEntry {
+        stream_id: Address::generate(&env),
+        sender: Address::generate(&env),
+        recipient: recipient_a.clone(),
+        registered_at: 1000,
+    });
+    client.register_stream(&StreamEntry {
+        stream_id: Address::generate(&env),
+        sender: Address::generate(&env),
+        recipient: Address::generate(&env),
+        registered_at: 1000,
+    });
 
-        let result = client.list_streams_by_sender(&sender_a);
-        assert_eq!(result.len(), 2);
-    }
+    let result = client.list_streams_by_recipient(&recipient_a);
+    assert_eq!(result.len(), 1);
+}
 
-    #[test]
-    fn list_streams_by_sender_returns_empty_for_unknown_sender() {
-        let env = create_env();
-        let contract_id = register_contract(&env);
-        let client = VeloxRegistryClient::new(&env, &contract_id);
+#[test]
+fn register_schedule_stores_entry() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = VeloxRegistryClient::new(&env, &contract_id);
 
-        let unknown = Address::generate(&env);
-        let result = client.list_streams_by_sender(&unknown);
-        assert_eq!(result.len(), 0);
-    }
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let schedule_id = Address::generate(&env);
 
-    #[test]
-    fn list_streams_by_recipient_returns_only_matching_streams() {
-        let env = create_env();
-        let contract_id = register_contract(&env);
-        let client = VeloxRegistryClient::new(&env, &contract_id);
+    let entry = ScheduleEntry {
+        schedule_id: schedule_id.clone(),
+        sender: sender.clone(),
+        recipient: recipient.clone(),
+        registered_at: 2000,
+    };
 
-        let recipient_a = Address::generate(&env);
+    env.mock_all_auths();
+    client.register_schedule(&entry);
 
-        env.mock_all_auths();
+    let stored = client.get_schedule(&schedule_id).unwrap();
+    assert_eq!(stored.sender, sender);
+    assert_eq!(stored.recipient, recipient);
+}
 
-        client.register_stream(&StreamEntry {
-            stream_id: Address::generate(&env),
-            sender: Address::generate(&env),
-            recipient: recipient_a.clone(),
-            registered_at: 1000,
-        });
-        client.register_stream(&StreamEntry {
-            stream_id: Address::generate(&env),
-            sender: Address::generate(&env),
-            recipient: Address::generate(&env),
-            registered_at: 1000,
-        });
+#[test]
+fn get_stream_returns_none_for_unknown_id() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = VeloxRegistryClient::new(&env, &contract_id);
 
-        let result = client.list_streams_by_recipient(&recipient_a);
-        assert_eq!(result.len(), 1);
-    }
+    let unknown = Address::generate(&env);
+    assert!(client.get_stream(&unknown).is_none());
+}
 
-    #[test]
-    fn register_schedule_stores_entry() {
-        let env = create_env();
-        let contract_id = register_contract(&env);
-        let client = VeloxRegistryClient::new(&env, &contract_id);
+#[test]
+fn get_schedule_returns_none_for_unknown_id() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = VeloxRegistryClient::new(&env, &contract_id);
 
-        let sender = Address::generate(&env);
-        let recipient = Address::generate(&env);
-        let schedule_id = Address::generate(&env);
-
-        let entry = ScheduleEntry {
-            schedule_id: schedule_id.clone(),
-            sender: sender.clone(),
-            recipient: recipient.clone(),
-            registered_at: 2000,
-        };
-
-        env.mock_all_auths();
-        client.register_schedule(&entry);
-
-        let stored = client.get_schedule(&schedule_id).unwrap();
-        assert_eq!(stored.sender, sender);
-        assert_eq!(stored.recipient, recipient);
-    }
-
-    #[test]
-    fn get_stream_returns_none_for_unknown_id() {
-        let env = create_env();
-        let contract_id = register_contract(&env);
-        let client = VeloxRegistryClient::new(&env, &contract_id);
-
-        let unknown = Address::generate(&env);
-        assert!(client.get_stream(&unknown).is_none());
-    }
-
-    #[test]
-    fn get_schedule_returns_none_for_unknown_id() {
-        let env = create_env();
-        let contract_id = register_contract(&env);
-        let client = VeloxRegistryClient::new(&env, &contract_id);
-
-        let unknown = Address::generate(&env);
-        assert!(client.get_schedule(&unknown).is_none());
-    }
+    let unknown = Address::generate(&env);
+    assert!(client.get_schedule(&unknown).is_none());
 }

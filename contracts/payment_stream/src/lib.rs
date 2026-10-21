@@ -51,6 +51,9 @@ pub struct PaymentStream;
 impl PaymentStream {
     /// Initialise the stream. Called once by StreamFactory after deployment.
     /// Transfers the full funded amount from sender into contract escrow.
+    // One parameter per stream field: Soroban contract functions take typed scalar
+    // arguments, not a struct, so there is no fewer-argument alternative here.
+    #[allow(clippy::too_many_arguments)]
     pub fn initialize(
         env: Env,
         sender: Address,
@@ -88,7 +91,7 @@ impl PaymentStream {
 
         // Transfer funded tokens from sender into this contract
         let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&sender, &env.current_contract_address(), &total_funded);
+        token_client.transfer(&sender, env.current_contract_address(), &total_funded);
     }
 
     /// Recipient withdraws all currently claimable tokens.
@@ -149,7 +152,7 @@ impl PaymentStream {
 
         let token: Address = env.storage().persistent().get(&StreamKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&sender, &env.current_contract_address(), &additional_amount);
+        token_client.transfer(&sender, env.current_contract_address(), &additional_amount);
 
         let total_funded: i128 = env
             .storage()
