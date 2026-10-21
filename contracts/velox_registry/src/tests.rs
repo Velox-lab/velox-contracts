@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use crate::{ScheduleEntry, StreamEntry, VeloxRegistry, VeloxRegistryClient};
     use soroban_sdk::{testutils::Address as _, Address, Env};
-    use crate::{VeloxRegistry, VeloxRegistryClient, ScheduleEntry, StreamEntry};
 
     fn create_env() -> Env {
         Env::default()

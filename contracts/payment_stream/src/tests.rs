@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests {
+    use crate::{PaymentStream, PaymentStreamClient, StreamStatus};
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
         token::StellarAssetClient,
         Address, Env,
     };
-    use crate::{PaymentStream, PaymentStreamClient, StreamStatus};
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -37,10 +37,7 @@ mod tests {
         env.ledger().with_mut(|li| li.timestamp = 1000);
 
         client.initialize(
-            &sender,
-            &recipient,
-            &token,
-            &10_i128,   // rate per second
+            &sender, &recipient, &token, &10_i128,   // rate per second
             &1000_u64,  // start_time
             &1100_u64,  // end_time (100 seconds)
             &1000_i128, // total_funded
@@ -84,7 +81,9 @@ mod tests {
 
         // An attacker tries to overwrite the stream with themselves as recipient
         let attacker = Address::generate(&env);
-        client.initialize(&attacker, &attacker, &token, &10, &1000_u64, &1100_u64, &1000);
+        client.initialize(
+            &attacker, &attacker, &token, &10, &1000_u64, &1100_u64, &1000,
+        );
     }
 
     #[test]
@@ -100,7 +99,9 @@ mod tests {
 
         env.mock_all_auths();
         env.ledger().with_mut(|li| li.timestamp = 5000);
-        client.initialize(&sender, &recipient, &token, &10, &1000_u64, &6000_u64, &1000);
+        client.initialize(
+            &sender, &recipient, &token, &10, &1000_u64, &6000_u64, &1000,
+        );
     }
 
     #[test]
@@ -115,7 +116,9 @@ mod tests {
         let token = Address::generate(&env);
 
         env.mock_all_auths();
-        client.initialize(&sender, &recipient, &token, &10, &2000_u64, &1000_u64, &1000);
+        client.initialize(
+            &sender, &recipient, &token, &10, &2000_u64, &1000_u64, &1000,
+        );
     }
 
     #[test]

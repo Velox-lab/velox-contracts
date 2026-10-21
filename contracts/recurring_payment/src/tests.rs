@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests {
+    use crate::{Error, RecurringPayment, RecurringPaymentClient, ScheduleStatus};
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
         token::{StellarAssetClient, TokenClient},
         Address, Env,
     };
-    use crate::{Error, RecurringPayment, RecurringPaymentClient, ScheduleStatus};
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -40,9 +40,9 @@ mod tests {
             &sender,
             &recipient,
             &token,
-            &100_i128,          // amount per interval
-            &604_800_u64,       // interval: 7 days in seconds
-            &1_604_800_u64,     // first payment in ~7 days
+            &100_i128,      // amount per interval
+            &604_800_u64,   // interval: 7 days in seconds
+            &1_604_800_u64, // first payment in ~7 days
         );
 
         // Sender allows the schedule to pull up to 1_000 tokens (10 payments)
@@ -100,7 +100,14 @@ mod tests {
 
         env.mock_all_auths();
         env.ledger().with_mut(|li| li.timestamp = 1_000_000);
-        client.initialize(&sender, &recipient, &token, &0, &604_800_u64, &1_604_800_u64);
+        client.initialize(
+            &sender,
+            &recipient,
+            &token,
+            &0,
+            &604_800_u64,
+            &1_604_800_u64,
+        );
     }
 
     #[test]
@@ -131,7 +138,14 @@ mod tests {
 
         env.mock_all_auths();
         env.ledger().with_mut(|li| li.timestamp = 1_000_000);
-        let result = client.try_initialize(&sender, &recipient, &token, &0, &604_800_u64, &1_604_800_u64);
+        let result = client.try_initialize(
+            &sender,
+            &recipient,
+            &token,
+            &0,
+            &604_800_u64,
+            &1_604_800_u64,
+        );
 
         assert_eq!(result, Err(Ok(Error::AmountMustBePositive)));
     }
@@ -148,7 +162,14 @@ mod tests {
 
         env.mock_all_auths();
         env.ledger().with_mut(|li| li.timestamp = 1_000_000);
-        let result = client.try_initialize(&sender, &recipient, &token, &100, &604_800_u64, &999_999_u64);
+        let result = client.try_initialize(
+            &sender,
+            &recipient,
+            &token,
+            &100,
+            &604_800_u64,
+            &999_999_u64,
+        );
 
         assert_eq!(result, Err(Ok(Error::FirstPaymentInPast)));
     }
@@ -183,7 +204,14 @@ mod tests {
 
         // An attacker tries to overwrite the schedule with themselves as recipient
         let attacker = Address::generate(&env);
-        client.initialize(&attacker, &attacker, &Address::generate(&env), &1, &1_u64, &1_604_800_u64);
+        client.initialize(
+            &attacker,
+            &attacker,
+            &Address::generate(&env),
+            &1,
+            &1_u64,
+            &1_604_800_u64,
+        );
     }
 
     #[test]

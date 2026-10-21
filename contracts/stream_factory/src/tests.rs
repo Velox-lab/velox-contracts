@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests {
+    use crate::{StreamFactory, StreamFactoryClient};
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
         token::{StellarAssetClient, TokenClient},
         Address, BytesN, Env,
     };
-    use crate::{StreamFactory, StreamFactoryClient};
 
     // Real contract WASM, so the factory can deploy instances by hash.
     // Build first with: cargo build --target wasm32v1-none --release
@@ -42,11 +42,20 @@ mod tests {
 
         let registry_id = env.register(registry_wasm::WASM, (Address::generate(env),));
         let registry = registry_wasm::Client::new(env, &registry_id);
-        let stream_hash = env.deployer().upload_contract_wasm(payment_stream_wasm::WASM);
-        let schedule_hash = env.deployer().upload_contract_wasm(recurring_payment_wasm::WASM);
+        let stream_hash = env
+            .deployer()
+            .upload_contract_wasm(payment_stream_wasm::WASM);
+        let schedule_hash = env
+            .deployer()
+            .upload_contract_wasm(recurring_payment_wasm::WASM);
 
         let factory = StreamFactoryClient::new(env, &env.register(StreamFactory, ()));
-        factory.initialize(&Address::generate(env), &registry_id, &stream_hash, &schedule_hash);
+        factory.initialize(
+            &Address::generate(env),
+            &registry_id,
+            &stream_hash,
+            &schedule_hash,
+        );
         registry.set_factory(&factory.address);
 
         let sender = Address::generate(env);
@@ -267,7 +276,13 @@ mod tests {
         env.ledger().with_mut(|li| li.timestamp = 1000);
 
         let stream_id = d.factory.create_stream(
-            &d.sender, &d.recipient, &d.token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+            &d.sender,
+            &d.recipient,
+            &d.token,
+            &10_i128,
+            &1000_u64,
+            &1100_u64,
+            &1000_i128,
         );
 
         let info = payment_stream_wasm::Client::new(&env, &stream_id).get_stream_info();
@@ -294,7 +309,13 @@ mod tests {
         env.ledger().with_mut(|li| li.timestamp = 1000);
 
         let stream_id = d.factory.create_stream(
-            &d.sender, &d.recipient, &d.token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+            &d.sender,
+            &d.recipient,
+            &d.token,
+            &10_i128,
+            &1000_u64,
+            &1100_u64,
+            &1000_i128,
         );
 
         let all = d.registry.get_all_streams();
@@ -317,10 +338,22 @@ mod tests {
 
         // Identical parameters must still produce two separate streams
         let first = d.factory.create_stream(
-            &d.sender, &d.recipient, &d.token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+            &d.sender,
+            &d.recipient,
+            &d.token,
+            &10_i128,
+            &1000_u64,
+            &1100_u64,
+            &1000_i128,
         );
         let second = d.factory.create_stream(
-            &d.sender, &d.recipient, &d.token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+            &d.sender,
+            &d.recipient,
+            &d.token,
+            &10_i128,
+            &1000_u64,
+            &1100_u64,
+            &1000_i128,
         );
 
         assert_ne!(first, second);
@@ -334,7 +367,13 @@ mod tests {
         env.ledger().with_mut(|li| li.timestamp = 1000);
 
         let stream_id = d.factory.create_stream(
-            &d.sender, &d.recipient, &d.token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+            &d.sender,
+            &d.recipient,
+            &d.token,
+            &10_i128,
+            &1000_u64,
+            &1100_u64,
+            &1000_i128,
         );
 
         env.ledger().with_mut(|li| li.timestamp = 1050);
@@ -352,7 +391,12 @@ mod tests {
         env.ledger().with_mut(|li| li.timestamp = 1_000_000);
 
         let schedule_id = d.factory.create_schedule(
-            &d.sender, &d.recipient, &d.token, &100_i128, &604_800_u64, &1_604_800_u64,
+            &d.sender,
+            &d.recipient,
+            &d.token,
+            &100_i128,
+            &604_800_u64,
+            &1_604_800_u64,
         );
 
         let info = recurring_payment_wasm::Client::new(&env, &schedule_id).get_schedule_info();
@@ -372,7 +416,12 @@ mod tests {
         env.ledger().with_mut(|li| li.timestamp = 1_000_000);
 
         let schedule_id = d.factory.create_schedule(
-            &d.sender, &d.recipient, &d.token, &100_i128, &604_800_u64, &1_604_800_u64,
+            &d.sender,
+            &d.recipient,
+            &d.token,
+            &100_i128,
+            &604_800_u64,
+            &1_604_800_u64,
         );
 
         let all = d.registry.get_all_schedules();
@@ -391,7 +440,12 @@ mod tests {
         env.ledger().with_mut(|li| li.timestamp = 1_000_000);
 
         let schedule_id = d.factory.create_schedule(
-            &d.sender, &d.recipient, &d.token, &100_i128, &604_800_u64, &1_604_800_u64,
+            &d.sender,
+            &d.recipient,
+            &d.token,
+            &100_i128,
+            &604_800_u64,
+            &1_604_800_u64,
         );
 
         let token = TokenClient::new(&env, &d.token);

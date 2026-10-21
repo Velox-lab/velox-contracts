@@ -93,7 +93,11 @@ impl PaymentStream {
 
     /// Recipient withdraws all currently claimable tokens.
     pub fn withdraw(env: Env) {
-        let recipient: Address = env.storage().persistent().get(&StreamKey::Recipient).unwrap();
+        let recipient: Address = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::Recipient)
+            .unwrap();
         recipient.require_auth();
 
         Self::assert_stream_is_active(&env);
@@ -101,7 +105,11 @@ impl PaymentStream {
         let claimable = Self::calculate_claimable_balance(&env);
         assert!(claimable > 0, "nothing to withdraw");
 
-        let total_withdrawn: i128 = env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap();
+        let total_withdrawn: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::TotalWithdrawn)
+            .unwrap();
         env.storage()
             .persistent()
             .set(&StreamKey::TotalWithdrawn, &(total_withdrawn + claimable));
@@ -134,19 +142,30 @@ impl PaymentStream {
         sender.require_auth();
 
         Self::assert_stream_is_active(&env);
-        assert!(additional_amount > 0, "top-up amount must be greater than zero");
+        assert!(
+            additional_amount > 0,
+            "top-up amount must be greater than zero"
+        );
 
         let token: Address = env.storage().persistent().get(&StreamKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&sender, &env.current_contract_address(), &additional_amount);
 
-        let total_funded: i128 = env.storage().persistent().get(&StreamKey::TotalFunded).unwrap();
+        let total_funded: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::TotalFunded)
+            .unwrap();
         env.storage()
             .persistent()
             .set(&StreamKey::TotalFunded, &(total_funded + additional_amount));
 
         // Extend end_time proportionally based on rate
-        let rate: i128 = env.storage().persistent().get(&StreamKey::RatePerSecond).unwrap();
+        let rate: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::RatePerSecond)
+            .unwrap();
         let extra_seconds = (additional_amount / rate) as u64;
         let end_time: u64 = env.storage().persistent().get(&StreamKey::EndTime).unwrap();
         env.storage()
@@ -171,17 +190,26 @@ impl PaymentStream {
 
     /// Returns the stream recipient address.
     pub fn get_recipient(env: Env) -> Address {
-        env.storage().persistent().get(&StreamKey::Recipient).unwrap()
+        env.storage()
+            .persistent()
+            .get(&StreamKey::Recipient)
+            .unwrap()
     }
 
     /// Returns the total amount funded into the stream.
     pub fn get_total_funded(env: Env) -> i128 {
-        env.storage().persistent().get(&StreamKey::TotalFunded).unwrap()
+        env.storage()
+            .persistent()
+            .get(&StreamKey::TotalFunded)
+            .unwrap()
     }
 
     /// Returns the total amount withdrawn from the stream so far.
     pub fn get_total_withdrawn(env: Env) -> i128 {
-        env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap()
+        env.storage()
+            .persistent()
+            .get(&StreamKey::TotalWithdrawn)
+            .unwrap()
     }
 
     /// Returns a complete snapshot of all stream fields in a single call.
@@ -211,9 +239,17 @@ impl PaymentStream {
             return;
         }
 
-        let recipient: Address = env.storage().persistent().get(&StreamKey::Recipient).unwrap();
+        let recipient: Address = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::Recipient)
+            .unwrap();
         let token: Address = env.storage().persistent().get(&StreamKey::Token).unwrap();
-        let total_withdrawn: i128 = env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap();
+        let total_withdrawn: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::TotalWithdrawn)
+            .unwrap();
 
         env.storage()
             .persistent()
@@ -226,8 +262,16 @@ impl PaymentStream {
     /// Transfer all unstreamed tokens back to the sender.
     /// Called during cancellation after paying out the recipient's earned balance.
     fn return_remaining_to_sender(env: &Env) {
-        let total_funded: i128 = env.storage().persistent().get(&StreamKey::TotalFunded).unwrap();
-        let total_withdrawn: i128 = env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap();
+        let total_funded: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::TotalFunded)
+            .unwrap();
+        let total_withdrawn: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::TotalWithdrawn)
+            .unwrap();
         let remaining = total_funded - total_withdrawn;
 
         if remaining <= 0 {
@@ -244,11 +288,27 @@ impl PaymentStream {
     /// claimable = (rate * elapsed) - already_withdrawn
     fn calculate_claimable_balance(env: &Env) -> i128 {
         let now = env.ledger().timestamp();
-        let start_time: u64 = env.storage().persistent().get(&StreamKey::StartTime).unwrap();
+        let start_time: u64 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::StartTime)
+            .unwrap();
         let end_time: u64 = env.storage().persistent().get(&StreamKey::EndTime).unwrap();
-        let rate: i128 = env.storage().persistent().get(&StreamKey::RatePerSecond).unwrap();
-        let total_funded: i128 = env.storage().persistent().get(&StreamKey::TotalFunded).unwrap();
-        let total_withdrawn: i128 = env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap();
+        let rate: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::RatePerSecond)
+            .unwrap();
+        let total_funded: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::TotalFunded)
+            .unwrap();
+        let total_withdrawn: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::TotalWithdrawn)
+            .unwrap();
 
         if now <= start_time {
             return 0;
@@ -271,8 +331,16 @@ impl PaymentStream {
     fn mark_completed_if_finished(env: &Env) {
         let now = env.ledger().timestamp();
         let end_time: u64 = env.storage().persistent().get(&StreamKey::EndTime).unwrap();
-        let total_funded: i128 = env.storage().persistent().get(&StreamKey::TotalFunded).unwrap();
-        let total_withdrawn: i128 = env.storage().persistent().get(&StreamKey::TotalWithdrawn).unwrap();
+        let total_funded: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::TotalFunded)
+            .unwrap();
+        let total_withdrawn: i128 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::TotalWithdrawn)
+            .unwrap();
 
         if now >= end_time && total_withdrawn >= total_funded {
             env.storage()
