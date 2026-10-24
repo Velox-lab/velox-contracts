@@ -155,11 +155,13 @@ cargo test
 
 ### Deploy to Testnet
 
+Deploying needs more than one `stellar contract deploy` call: `VeloxRegistry`,
+`StreamFactory`, and both the `PaymentStream` and `RecurringPayment` WASM go up
+in a specific order, and the registry and factory need to be wired together
+afterwards. See [DEPLOYMENT.md](DEPLOYMENT.md), or run it directly:
+
 ```bash
-stellar contract deploy \
-  --wasm target/wasm32v1-none/release/payment_stream.wasm \
-  --network testnet \
-  --source <your-testnet-account>
+scripts/deploy.sh testnet <your-deploy-identity>
 ```
 
 ---

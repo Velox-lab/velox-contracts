@@ -119,29 +119,51 @@ impl RecurringPayment {
             return Err(Error::PaymentNotDue);
         }
 
-        let sender: Address = env.storage().persistent().get(&ScheduleKey::Sender).unwrap();
+        let sender: Address = env
+            .storage()
+            .persistent()
+            .get(&ScheduleKey::Sender)
+            .unwrap();
         let recipient: Address = env
             .storage()
             .persistent()
             .get(&ScheduleKey::Recipient)
             .unwrap();
         let token: Address = env.storage().persistent().get(&ScheduleKey::Token).unwrap();
-        let amount: i128 = env.storage().persistent().get(&ScheduleKey::Amount).unwrap();
-        let interval: u64 = env.storage().persistent().get(&ScheduleKey::Interval).unwrap();
+        let amount: i128 = env
+            .storage()
+            .persistent()
+            .get(&ScheduleKey::Amount)
+            .unwrap();
+        let interval: u64 = env
+            .storage()
+            .persistent()
+            .get(&ScheduleKey::Interval)
+            .unwrap();
 
         // Advance next payment time before transferring, per the update-then-transfer rule
-        env.storage()
-            .persistent()
-            .set(&ScheduleKey::NextPaymentTime, &(next_payment_time + interval));
+        env.storage().persistent().set(
+            &ScheduleKey::NextPaymentTime,
+            &(next_payment_time + interval),
+        );
 
         let token_client = token::Client::new(&env, &token);
-        token_client.transfer_from(&env.current_contract_address(), &sender, &recipient, &amount);
+        token_client.transfer_from(
+            &env.current_contract_address(),
+            &sender,
+            &recipient,
+            &amount,
+        );
         Ok(())
     }
 
     /// Sender cancels the recurring schedule. No further payments will be made.
     pub fn cancel(env: Env) -> Result<(), Error> {
-        let sender: Address = env.storage().persistent().get(&ScheduleKey::Sender).unwrap();
+        let sender: Address = env
+            .storage()
+            .persistent()
+            .get(&ScheduleKey::Sender)
+            .unwrap();
         sender.require_auth();
 
         Self::assert_schedule_is_active(&env)?;
@@ -170,12 +192,18 @@ impl RecurringPayment {
 
     /// Returns the payment amount per interval.
     pub fn get_amount(env: Env) -> i128 {
-        env.storage().persistent().get(&ScheduleKey::Amount).unwrap()
+        env.storage()
+            .persistent()
+            .get(&ScheduleKey::Amount)
+            .unwrap()
     }
 
     /// Returns the interval in seconds between payments.
     pub fn get_interval(env: Env) -> u64 {
-        env.storage().persistent().get(&ScheduleKey::Interval).unwrap()
+        env.storage()
+            .persistent()
+            .get(&ScheduleKey::Interval)
+            .unwrap()
     }
 
     /// Returns a complete snapshot of all schedule fields in a single call.

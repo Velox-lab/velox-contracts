@@ -4,3 +4,4 @@
 .soroban/
 .env
 test_snapshots/
+deployed.*.env

@@ -11,6 +11,9 @@ use soroban_sdk::{
 
 #[contractclient(name = "PaymentStreamClient")]
 pub trait PaymentStreamInterface {
+    // Mirrors PaymentStream::initialize's signature exactly; see its own
+    // #[allow(clippy::too_many_arguments)] for why.
+    #[allow(clippy::too_many_arguments)]
     fn initialize(
         env: Env,
         sender: Address,
@@ -66,11 +69,11 @@ pub struct ScheduleEntry {
 
 #[contracttype]
 pub enum FactoryKey {
-    Registry,       // Address of VeloxRegistry contract
-    StreamWasm,     // WASM hash of PaymentStream contract
-    ScheduleWasm,   // WASM hash of RecurringPayment contract
-    Admin,          // Admin address allowed to update WASM hashes
-    DeployNonce,    // Counter used to derive a unique salt per deployment
+    Registry,     // Address of VeloxRegistry contract
+    StreamWasm,   // WASM hash of PaymentStream contract
+    ScheduleWasm, // WASM hash of RecurringPayment contract
+    Admin,        // Admin address allowed to update WASM hashes
+    DeployNonce,  // Counter used to derive a unique salt per deployment
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -102,6 +105,8 @@ impl StreamFactory {
     /// Deploy a new PaymentStream contract instance, initialize it (which escrows
     /// `total_funded` from the sender), and register it in VeloxRegistry.
     /// Returns the new stream's contract address.
+    // Same parameters as PaymentStream::initialize, forwarded as-is.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_stream(
         env: Env,
         sender: Address,
@@ -201,7 +206,10 @@ impl StreamFactory {
 
     /// Returns the VeloxRegistry contract address.
     pub fn get_registry(env: Env) -> Address {
-        env.storage().persistent().get(&FactoryKey::Registry).unwrap()
+        env.storage()
+            .persistent()
+            .get(&FactoryKey::Registry)
+            .unwrap()
     }
 
     /// Returns the admin address.
@@ -213,21 +221,29 @@ impl StreamFactory {
     pub fn set_stream_wasm(env: Env, new_hash: BytesN<32>) {
         let admin: Address = env.storage().persistent().get(&FactoryKey::Admin).unwrap();
         admin.require_auth();
-        env.storage().persistent().set(&FactoryKey::StreamWasm, &new_hash);
+        env.storage()
+            .persistent()
+            .set(&FactoryKey::StreamWasm, &new_hash);
     }
 
     /// Admin updates the RecurringPayment WASM hash (for upgrades).
     pub fn set_schedule_wasm(env: Env, new_hash: BytesN<32>) {
         let admin: Address = env.storage().persistent().get(&FactoryKey::Admin).unwrap();
         admin.require_auth();
-        env.storage().persistent().set(&FactoryKey::ScheduleWasm, &new_hash);
+        env.storage()
+            .persistent()
+            .set(&FactoryKey::ScheduleWasm, &new_hash);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /// Client for the VeloxRegistry configured at initialization.
     fn registry_client(env: &Env) -> VeloxRegistryClient<'_> {
-        let registry: Address = env.storage().persistent().get(&FactoryKey::Registry).unwrap();
+        let registry: Address = env
+            .storage()
+            .persistent()
+            .get(&FactoryKey::Registry)
+            .unwrap();
         VeloxRegistryClient::new(env, &registry)
     }
 

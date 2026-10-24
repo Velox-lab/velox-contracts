@@ -51,7 +51,9 @@ impl VeloxRegistry {
     pub fn set_factory(env: Env, factory: Address) {
         let admin: Address = env.storage().persistent().get(&RegistryKey::Admin).unwrap();
         admin.require_auth();
-        env.storage().persistent().set(&RegistryKey::Factory, &factory);
+        env.storage()
+            .persistent()
+            .set(&RegistryKey::Factory, &factory);
     }
 
     /// Returns the factory allowed to register entries, if one is set.
