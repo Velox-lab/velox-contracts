@@ -215,12 +215,12 @@ This repository is part of the **Velox** open-source project built on the Stella
 ## Roadmap
 
 - [x] Project scaffold and architecture design
-- [ ] `PaymentStream` contract — core implementation
-- [ ] `StreamFactory` contract
-- [ ] `RecurringPayment` contract
-- [ ] `VeloxRegistry` contract
-- [ ] Full test coverage (target: 100%)
-- [ ] Testnet deployment
+- [x] `PaymentStream` contract — core implementation
+- [x] `StreamFactory` contract
+- [x] `RecurringPayment` contract
+- [x] `VeloxRegistry` contract
+- [ ] Full test coverage (target: 100%) — 65 tests cover every public function's success path and panics; no coverage tool has measured the actual percentage
+- [ ] Testnet deployment — script and guide are ready (see DEPLOYMENT.md), not yet run
 - [ ] Security audit
 - [ ] Mainnet deployment
 
