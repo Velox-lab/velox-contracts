@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Cargo dependencies (soroban-sdk and the rest of Cargo.lock)
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    assignees:
+      - "Suzan-max"
+
+  # GitHub Actions used by .github/workflows/ci.yml
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    assignees:
+      - "Suzan-max"
