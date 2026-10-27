@@ -1,0 +1,15 @@
+# Normalize all text files to LF line endings in the repository, regardless
+# of which platform a contributor commits from. Every tracked file in this
+# repo was previously stored with CRLF line endings, which this also fixes
+# (see the commit that introduced this file).
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+
+# Lock files are machine-generated; diffs don't need special handling, but
+# they should still be LF so they do not churn on every platform.
+Cargo.lock text eol=lf -diff
+
+*.wasm binary
