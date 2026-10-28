@@ -221,8 +221,11 @@ Each contract uses Soroban's key-value storage. Storage keys are typed enums to 
 - `withdraw()` — authorized to recipient only
 - `cancel()` — authorized to sender only
 - `execute_payment()` — permissionless; it can only move the fixed amount to the fixed recipient once per interval, within the sender's token allowance
-- `initialize()` — can only be called once per contract; a second call panics with `already initialized`
+- `initialize()` — can only be called once per contract; a second call returns `Error::AlreadyInitialized`
 - `register_stream()` / `register_schedule()` on VeloxRegistry — authorized to the factory set by the registry admin via `set_factory()` only
+
+### Errors
+`PaymentStream` and `RecurringPayment` return a `#[contracterror] enum Error` from every function that can fail, instead of panicking with a string. A plain client call still panics on failure exactly as before — now with a numeric code (`Error(Contract, #N)`) instead of free text — and the generated `try_*` client methods let a caller match the exact error. `StreamFactory` and `VeloxRegistry` still use `assert!`/string panics; converting them is tracked as follow-up work, not yet done.
 
 ### Reentrancy
 - Soroban's execution model prevents reentrancy at the protocol level

@@ -1,4 +1,4 @@
-use crate::{PaymentStream, PaymentStreamClient, StreamStatus};
+use crate::{Error, PaymentStream, PaymentStreamClient, StreamStatus};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token::StellarAssetClient,
@@ -69,7 +69,7 @@ fn initialize_records_correct_total_funded() {
 }
 
 #[test]
-#[should_panic(expected = "already initialized")]
+#[should_panic(expected = "Error(Contract, #1)")]
 fn initialize_panics_when_called_twice() {
     let env = create_env();
     let contract_id = register_contract(&env);
@@ -85,7 +85,7 @@ fn initialize_panics_when_called_twice() {
 }
 
 #[test]
-#[should_panic(expected = "start_time must not be in the past")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn initialize_panics_when_start_time_is_in_the_past() {
     let env = create_env();
     let contract_id = register_contract(&env);
@@ -103,7 +103,7 @@ fn initialize_panics_when_start_time_is_in_the_past() {
 }
 
 #[test]
-#[should_panic(expected = "start_time must be before end_time")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn initialize_panics_when_start_time_after_end_time() {
     let env = create_env();
     let contract_id = register_contract(&env);
@@ -120,7 +120,7 @@ fn initialize_panics_when_start_time_after_end_time() {
 }
 
 #[test]
-#[should_panic(expected = "rate must be greater than zero")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn initialize_panics_when_rate_is_zero() {
     let env = create_env();
     let contract_id = register_contract(&env);
@@ -132,6 +132,38 @@ fn initialize_panics_when_rate_is_zero() {
 
     env.mock_all_auths();
     client.initialize(&sender, &recipient, &token, &0, &1000_u64, &2000_u64, &1000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn initialize_panics_when_funded_amount_is_zero() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&sender, &recipient, &token, &10, &1000_u64, &2000_u64, &0);
+}
+
+#[test]
+fn initialize_returns_typed_error_when_rate_is_zero() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    env.mock_all_auths();
+    let result =
+        client.try_initialize(&sender, &recipient, &token, &0, &1000_u64, &2000_u64, &1000);
+
+    assert_eq!(result, Err(Ok(Error::RateMustBePositive)));
 }
 
 // ── get_claimable_balance ─────────────────────────────────────────────────
@@ -205,7 +237,7 @@ fn withdraw_updates_total_withdrawn() {
 }
 
 #[test]
-#[should_panic(expected = "nothing to withdraw")]
+#[should_panic(expected = "Error(Contract, #7)")]
 fn withdraw_panics_when_nothing_is_claimable() {
     let env = create_env();
     let contract_id = register_contract(&env);
@@ -216,6 +248,21 @@ fn withdraw_panics_when_nothing_is_claimable() {
     env.ledger().with_mut(|li| li.timestamp = 1000); // at start, nothing earned yet
     env.mock_all_auths();
     client.withdraw();
+}
+
+#[test]
+fn withdraw_returns_typed_error_when_nothing_is_claimable() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    env.mock_all_auths();
+    let result = client.try_withdraw();
+
+    assert_eq!(result, Err(Ok(Error::NothingToWithdraw)));
 }
 
 // ── cancel ────────────────────────────────────────────────────────────────
@@ -236,7 +283,7 @@ fn cancel_sets_status_to_cancelled() {
 }
 
 #[test]
-#[should_panic(expected = "stream is not active")]
+#[should_panic(expected = "Error(Contract, #6)")]
 fn cancel_panics_on_already_cancelled_stream() {
     let env = create_env();
     let contract_id = register_contract(&env);
@@ -302,7 +349,7 @@ fn top_up_increases_total_funded() {
 }
 
 #[test]
-#[should_panic(expected = "top-up amount must be greater than zero")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn top_up_panics_when_amount_is_zero() {
     let env = create_env();
     let contract_id = register_contract(&env);
