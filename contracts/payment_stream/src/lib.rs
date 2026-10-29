@@ -1,5 +1,21 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, Env};
+
+// ── Errors ────────────────────────────────────────────────────────────────────
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum Error {
+    AlreadyInitialized = 1,
+    StartTimeAfterEndTime = 2,
+    StartTimeInPast = 3,
+    RateMustBePositive = 4,
+    FundedAmountMustBePositive = 5,
+    StreamNotActive = 6,
+    NothingToWithdraw = 7,
+    TopUpAmountMustBePositive = 8,
+}
 
 // ── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -63,20 +79,24 @@ impl PaymentStream {
         start_time: u64,
         end_time: u64,
         total_funded: i128,
-    ) {
+    ) -> Result<(), Error> {
         sender.require_auth();
 
-        assert!(
-            !env.storage().persistent().has(&StreamKey::Status),
-            "already initialized"
-        );
-        assert!(start_time < end_time, "start_time must be before end_time");
-        assert!(
-            start_time >= env.ledger().timestamp(),
-            "start_time must not be in the past"
-        );
-        assert!(rate_per_second > 0, "rate must be greater than zero");
-        assert!(total_funded > 0, "funded amount must be greater than zero");
+        if env.storage().persistent().has(&StreamKey::Status) {
+            return Err(Error::AlreadyInitialized);
+        }
+        if start_time >= end_time {
+            return Err(Error::StartTimeAfterEndTime);
+        }
+        if start_time < env.ledger().timestamp() {
+            return Err(Error::StartTimeInPast);
+        }
+        if rate_per_second <= 0 {
+            return Err(Error::RateMustBePositive);
+        }
+        if total_funded <= 0 {
+            return Err(Error::FundedAmountMustBePositive);
+        }
 
         let storage = env.storage().persistent();
         storage.set(&StreamKey::Sender, &sender);
@@ -92,10 +112,11 @@ impl PaymentStream {
         // Transfer funded tokens from sender into this contract
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&sender, env.current_contract_address(), &total_funded);
+        Ok(())
     }
 
     /// Recipient withdraws all currently claimable tokens.
-    pub fn withdraw(env: Env) {
+    pub fn withdraw(env: Env) -> Result<(), Error> {
         let recipient: Address = env
             .storage()
             .persistent()
@@ -103,10 +124,12 @@ impl PaymentStream {
             .unwrap();
         recipient.require_auth();
 
-        Self::assert_stream_is_active(&env);
+        Self::assert_stream_is_active(&env)?;
 
         let claimable = Self::calculate_claimable_balance(&env);
-        assert!(claimable > 0, "nothing to withdraw");
+        if claimable <= 0 {
+            return Err(Error::NothingToWithdraw);
+        }
 
         let total_withdrawn: i128 = env
             .storage()
@@ -122,33 +145,34 @@ impl PaymentStream {
         token_client.transfer(&env.current_contract_address(), &recipient, &claimable);
 
         Self::mark_completed_if_finished(&env);
+        Ok(())
     }
 
     /// Sender cancels the stream and reclaims all unstreamed tokens.
     /// Pays out any earned balance to the recipient first, then returns the rest to sender.
-    pub fn cancel(env: Env) {
+    pub fn cancel(env: Env) -> Result<(), Error> {
         let sender: Address = env.storage().persistent().get(&StreamKey::Sender).unwrap();
         sender.require_auth();
 
-        Self::assert_stream_is_active(&env);
+        Self::assert_stream_is_active(&env)?;
         Self::pay_out_earned_balance(&env);
         Self::return_remaining_to_sender(&env);
 
         env.storage()
             .persistent()
             .set(&StreamKey::Status, &StreamStatus::Cancelled);
+        Ok(())
     }
 
     /// Sender tops up the stream with additional tokens, extending its duration.
-    pub fn top_up(env: Env, additional_amount: i128) {
+    pub fn top_up(env: Env, additional_amount: i128) -> Result<(), Error> {
         let sender: Address = env.storage().persistent().get(&StreamKey::Sender).unwrap();
         sender.require_auth();
 
-        Self::assert_stream_is_active(&env);
-        assert!(
-            additional_amount > 0,
-            "top-up amount must be greater than zero"
-        );
+        Self::assert_stream_is_active(&env)?;
+        if additional_amount <= 0 {
+            return Err(Error::TopUpAmountMustBePositive);
+        }
 
         let token: Address = env.storage().persistent().get(&StreamKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token);
@@ -174,6 +198,7 @@ impl PaymentStream {
         env.storage()
             .persistent()
             .set(&StreamKey::EndTime, &(end_time + extra_seconds));
+        Ok(())
     }
 
     /// Returns how many tokens the recipient can withdraw right now.
@@ -324,10 +349,13 @@ impl PaymentStream {
         (earned - total_withdrawn).max(0)
     }
 
-    /// Panic if the stream is not in Active status.
-    fn assert_stream_is_active(env: &Env) {
+    /// Return an error if the stream is not in Active status.
+    fn assert_stream_is_active(env: &Env) -> Result<(), Error> {
         let status: StreamStatus = env.storage().persistent().get(&StreamKey::Status).unwrap();
-        assert!(status == StreamStatus::Active, "stream is not active");
+        if status != StreamStatus::Active {
+            return Err(Error::StreamNotActive);
+        }
+        Ok(())
     }
 
     /// Mark the stream as Completed if end_time has passed and balance is fully withdrawn.
