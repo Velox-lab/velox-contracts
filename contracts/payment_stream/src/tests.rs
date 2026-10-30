@@ -360,3 +360,151 @@ fn top_up_panics_when_amount_is_zero() {
     env.mock_all_auths();
     client.top_up(&0_i128);
 }
+
+// ── pause_stream / resume_stream ──────────────────────────────────────────
+
+#[test]
+fn pause_stream_transitions_active_to_paused() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.mock_all_auths();
+    client.pause_stream();
+
+    assert_eq!(client.get_stream_status(), StreamStatus::Paused);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn pause_stream_panics_when_already_paused() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.mock_all_auths();
+    client.pause_stream();
+    client.pause_stream();
+}
+
+#[test]
+fn pause_stream_requires_sender_auth() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+    let (sender, _recipient, _token) = setup_stream(&env, &client);
+
+    env.mock_all_auths();
+    client.pause_stream();
+
+    let auths = env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, sender);
+}
+
+#[test]
+fn resume_stream_transitions_paused_to_active() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.mock_all_auths();
+    client.pause_stream();
+    client.resume_stream();
+
+    assert_eq!(client.get_stream_status(), StreamStatus::Active);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn resume_stream_panics_when_not_paused() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.mock_all_auths();
+    client.resume_stream(); // still Active, never paused
+}
+
+#[test]
+fn resume_stream_returns_typed_error_when_not_paused() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.mock_all_auths();
+    let result = client.try_resume_stream();
+
+    assert_eq!(result, Err(Ok(Error::StreamNotPaused)));
+}
+
+#[test]
+fn claimable_balance_stops_growing_while_paused() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client); // start=1000, end=1100, rate=10/s
+
+    env.ledger().with_mut(|li| li.timestamp = 1050); // 50s elapsed, 500 earned
+    env.mock_all_auths();
+    client.pause_stream();
+    assert_eq!(client.get_claimable_balance(), 500_i128);
+
+    // Advance real time by 200s while paused — claimable must not move
+    env.ledger().with_mut(|li| li.timestamp = 1250);
+    assert_eq!(client.get_claimable_balance(), 500_i128);
+}
+
+#[test]
+fn claimable_balance_resumes_growing_after_resume_with_no_gap_or_jump() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client); // start=1000, end=1100, rate=10/s
+
+    env.ledger().with_mut(|li| li.timestamp = 1050); // 500 earned
+    env.mock_all_auths();
+    client.pause_stream();
+
+    env.ledger().with_mut(|li| li.timestamp = 1250); // paused for 200s
+    client.resume_stream();
+
+    // Resuming must not grant or lose anything for the paused interval
+    assert_eq!(client.get_claimable_balance(), 500_i128);
+
+    // 30 more seconds of real activity after resume earns 30 more
+    env.ledger().with_mut(|li| li.timestamp = 1280);
+    assert_eq!(client.get_claimable_balance(), 800_i128);
+
+    // The stream still ends 100 total active seconds after it started,
+    // just shifted later by however long it was paused (100 - 50 = 50 remain)
+    let info = client.get_stream_info();
+    assert_eq!(info.end_time, 1100 + 200);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn withdraw_panics_while_paused() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.ledger().with_mut(|li| li.timestamp = 1050);
+    env.mock_all_auths();
+    client.pause_stream();
+    client.withdraw();
+}

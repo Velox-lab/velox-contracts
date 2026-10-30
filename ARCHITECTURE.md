@@ -81,21 +81,22 @@ Each `PaymentStream` is an independent contract instance. It holds the streamed 
 State machine:
 
 ```
-         create_stream()
-               │
-               ▼
-           [ Active ]
-          /           \
-  cancel()          withdraw()
-      │                  │
-      ▼                  ▼
- [Cancelled]        (partial or full)
-                         │
-                  end_time reached
-                  + balance = zero
-                         │
-                         ▼
-                    [Completed]
+                 create_stream()
+                       │
+                       ▼
+                  [ Active ] ◀──────────────┐
+                 /     │     \              │
+         cancel()  withdraw()  pause_stream()
+             │          │            │      │
+             ▼          ▼            ▼      │
+       [Cancelled] (partial or    [ Paused ]│
+                       full)          │      │
+                       │       resume_stream()
+                end_time reached      │      │
+                + balance = zero      └──────┘
+                       │       (start_time and end_time both
+                       ▼        shift forward by however long
+                 [Completed]    the stream was paused)
 ```
 
 Key invariants:
@@ -103,7 +104,11 @@ Key invariants:
 - `elapsed_seconds = min(now, end_time) - start_time`
 - Withdrawals never exceed the total funded amount
 - Only the recipient can call `withdraw()`
-- Only the sender can call `cancel()` or `top_up()`
+- Only the sender can call `cancel()`, `top_up()`, `pause_stream()` or `resume_stream()`
+- While `Paused`, `elapsed_seconds` is frozen at the moment `pause_stream()` was
+  called, so `claimable_balance` does not grow
+- `withdraw()`, `cancel()` and `top_up()` all require `Active`; a paused stream
+  must be resumed before any of them can be called
 
 ---
 
@@ -198,7 +203,8 @@ Each contract uses Soroban's key-value storage. Storage keys are typed enums to 
 | `EndTime` | `u64` | Unix timestamp |
 | `TotalFunded` | `i128` | Total tokens deposited |
 | `TotalWithdrawn` | `i128` | Total tokens withdrawn |
-| `Status` | `StreamStatus` | Active / Cancelled / Completed |
+| `Status` | `StreamStatus` | Active / Cancelled / Completed / Paused |
+| `PausedAt` | `u64` | Unix timestamp of `pause_stream()`; only set while Paused |
 
 ### RecurringPayment Storage Keys
 

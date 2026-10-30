@@ -15,6 +15,7 @@ pub enum Error {
     StreamNotActive = 6,
     NothingToWithdraw = 7,
     TopUpAmountMustBePositive = 8,
+    StreamNotPaused = 9,
 }
 
 // ── Storage Keys ─────────────────────────────────────────────────────────────
@@ -30,6 +31,10 @@ pub enum StreamKey {
     TotalFunded,
     TotalWithdrawn,
     Status,
+    /// Ledger timestamp when pause_stream was called. Only set while Paused;
+    /// used as a frozen "now" so claimable balance stops growing, and to compute
+    /// how long the stream was paused so resume_stream can shift start/end by it.
+    PausedAt,
 }
 
 // ── Data Types ────────────────────────────────────────────────────────────────
@@ -40,6 +45,10 @@ pub enum StreamStatus {
     Active,
     Cancelled,
     Completed,
+    // Appended, not inserted before Cancelled/Completed: an unadorned #[contracttype]
+    // enum encodes variants by declaration order, so inserting one earlier would
+    // silently renumber the later variants and corrupt any already-stored status.
+    Paused,
 }
 
 /// A snapshot of the full stream state returned by get_stream_info.
@@ -201,6 +210,61 @@ impl PaymentStream {
         Ok(())
     }
 
+    /// Sender pauses the stream. Claimable balance stops growing until resume_stream.
+    pub fn pause_stream(env: Env) -> Result<(), Error> {
+        let sender: Address = env.storage().persistent().get(&StreamKey::Sender).unwrap();
+        sender.require_auth();
+
+        Self::assert_stream_is_active(&env)?;
+
+        let now = env.ledger().timestamp();
+        env.storage().persistent().set(&StreamKey::PausedAt, &now);
+        env.storage()
+            .persistent()
+            .set(&StreamKey::Status, &StreamStatus::Paused);
+        Ok(())
+    }
+
+    /// Sender resumes a paused stream. Shifts start_time and end_time forward by
+    /// however long the stream was paused, so the remaining duration and rate are
+    /// unchanged and the paused interval never counts as elapsed time.
+    pub fn resume_stream(env: Env) -> Result<(), Error> {
+        let sender: Address = env.storage().persistent().get(&StreamKey::Sender).unwrap();
+        sender.require_auth();
+
+        let status: StreamStatus = env.storage().persistent().get(&StreamKey::Status).unwrap();
+        if status != StreamStatus::Paused {
+            return Err(Error::StreamNotPaused);
+        }
+
+        let paused_at: u64 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::PausedAt)
+            .unwrap();
+        let now = env.ledger().timestamp();
+        let paused_duration = now - paused_at;
+
+        let start_time: u64 = env
+            .storage()
+            .persistent()
+            .get(&StreamKey::StartTime)
+            .unwrap();
+        let end_time: u64 = env.storage().persistent().get(&StreamKey::EndTime).unwrap();
+        env.storage()
+            .persistent()
+            .set(&StreamKey::StartTime, &(start_time + paused_duration));
+        env.storage()
+            .persistent()
+            .set(&StreamKey::EndTime, &(end_time + paused_duration));
+
+        env.storage().persistent().remove(&StreamKey::PausedAt);
+        env.storage()
+            .persistent()
+            .set(&StreamKey::Status, &StreamStatus::Active);
+        Ok(())
+    }
+
     /// Returns how many tokens the recipient can withdraw right now.
     pub fn get_claimable_balance(env: Env) -> i128 {
         Self::calculate_claimable_balance(&env)
@@ -315,7 +379,17 @@ impl PaymentStream {
     /// Calculate how many tokens are claimable at the current ledger timestamp.
     /// claimable = (rate * elapsed) - already_withdrawn
     fn calculate_claimable_balance(env: &Env) -> i128 {
-        let now = env.ledger().timestamp();
+        // While paused, freeze "now" at the moment pause_stream was called, so
+        // claimable balance stops growing until resume_stream shifts the schedule.
+        let status: StreamStatus = env.storage().persistent().get(&StreamKey::Status).unwrap();
+        let now = if status == StreamStatus::Paused {
+            env.storage()
+                .persistent()
+                .get(&StreamKey::PausedAt)
+                .unwrap()
+        } else {
+            env.ledger().timestamp()
+        };
         let start_time: u64 = env
             .storage()
             .persistent()
