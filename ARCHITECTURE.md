@@ -238,7 +238,15 @@ Each contract uses Soroban's key-value storage. Storage keys are typed enums to 
 - Internal state is updated before any token transfers as an additional safeguard
 
 ### Integer Overflow
-- All arithmetic uses checked operations
+- All amount and timestamp arithmetic in `PaymentStream` and `RecurringPayment`
+  uses `checked_add` / `checked_sub` / `checked_mul`. In a function that already
+  returns `Result<(), Error>`, overflow returns `Error::ArithmeticOverflow`; in
+  `PaymentStream::calculate_claimable_balance`, which stays infallible because
+  both a mutating function and a view function call it, overflow panics with the
+  same typed error instead via `panic_with_error!`.
+- `StreamFactory`'s deploy nonce increment (`nonce + 1`) is not checked. Not
+  worth it in practice — it would take over 10^19 deployments to overflow a
+  `u64` — but it means the claim above does not (yet) cover every contract.
 - Token amounts use `i128` to accommodate large values with precision
 
 ### Time Manipulation
