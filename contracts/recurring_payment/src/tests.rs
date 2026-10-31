@@ -357,3 +357,36 @@ fn execute_payment_panics_on_cancelled_schedule() {
     env.ledger().with_mut(|li| li.timestamp = 1_604_800);
     client.execute_payment(); // should panic — schedule cancelled
 }
+
+// ── checked arithmetic ────────────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn execute_payment_panics_when_next_payment_time_overflows() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = RecurringPaymentClient::new(&env, &contract_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_funded_token(&env, &sender, 10_000);
+
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.initialize(
+        &sender,
+        &recipient,
+        &token,
+        &100_i128,
+        &u64::MAX,       // interval
+        &(u64::MAX - 5), // first_payment_time
+    );
+
+    let expiration_ledger = env.ledger().sequence() + 100_000;
+    TokenClient::new(&env, &token).approve(&sender, &contract_id, &1_000, &expiration_ledger);
+
+    // now >= next_payment_time, so the payment is due; next_payment_time + interval
+    // (u64::MAX - 5) + u64::MAX overflows u64.
+    env.ledger().with_mut(|li| li.timestamp = u64::MAX - 5);
+    client.execute_payment();
+}

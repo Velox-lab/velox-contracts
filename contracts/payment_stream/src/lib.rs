@@ -1,5 +1,7 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, Env};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, panic_with_error, token, Address, Env,
+};
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
@@ -16,6 +18,7 @@ pub enum Error {
     NothingToWithdraw = 7,
     TopUpAmountMustBePositive = 8,
     StreamNotPaused = 9,
+    ArithmeticOverflow = 10,
 }
 
 // ── Storage Keys ─────────────────────────────────────────────────────────────
@@ -145,9 +148,12 @@ impl PaymentStream {
             .persistent()
             .get(&StreamKey::TotalWithdrawn)
             .unwrap();
+        let new_total_withdrawn = total_withdrawn
+            .checked_add(claimable)
+            .ok_or(Error::ArithmeticOverflow)?;
         env.storage()
             .persistent()
-            .set(&StreamKey::TotalWithdrawn, &(total_withdrawn + claimable));
+            .set(&StreamKey::TotalWithdrawn, &new_total_withdrawn);
 
         let token: Address = env.storage().persistent().get(&StreamKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token);
@@ -164,8 +170,8 @@ impl PaymentStream {
         sender.require_auth();
 
         Self::assert_stream_is_active(&env)?;
-        Self::pay_out_earned_balance(&env);
-        Self::return_remaining_to_sender(&env);
+        Self::pay_out_earned_balance(&env)?;
+        Self::return_remaining_to_sender(&env)?;
 
         env.storage()
             .persistent()
@@ -192,9 +198,12 @@ impl PaymentStream {
             .persistent()
             .get(&StreamKey::TotalFunded)
             .unwrap();
+        let new_total_funded = total_funded
+            .checked_add(additional_amount)
+            .ok_or(Error::ArithmeticOverflow)?;
         env.storage()
             .persistent()
-            .set(&StreamKey::TotalFunded, &(total_funded + additional_amount));
+            .set(&StreamKey::TotalFunded, &new_total_funded);
 
         // Extend end_time proportionally based on rate
         let rate: i128 = env
@@ -204,9 +213,12 @@ impl PaymentStream {
             .unwrap();
         let extra_seconds = (additional_amount / rate) as u64;
         let end_time: u64 = env.storage().persistent().get(&StreamKey::EndTime).unwrap();
+        let new_end_time = end_time
+            .checked_add(extra_seconds)
+            .ok_or(Error::ArithmeticOverflow)?;
         env.storage()
             .persistent()
-            .set(&StreamKey::EndTime, &(end_time + extra_seconds));
+            .set(&StreamKey::EndTime, &new_end_time);
         Ok(())
     }
 
@@ -243,7 +255,9 @@ impl PaymentStream {
             .get(&StreamKey::PausedAt)
             .unwrap();
         let now = env.ledger().timestamp();
-        let paused_duration = now - paused_at;
+        let paused_duration = now
+            .checked_sub(paused_at)
+            .ok_or(Error::ArithmeticOverflow)?;
 
         let start_time: u64 = env
             .storage()
@@ -251,12 +265,18 @@ impl PaymentStream {
             .get(&StreamKey::StartTime)
             .unwrap();
         let end_time: u64 = env.storage().persistent().get(&StreamKey::EndTime).unwrap();
+        let new_start_time = start_time
+            .checked_add(paused_duration)
+            .ok_or(Error::ArithmeticOverflow)?;
+        let new_end_time = end_time
+            .checked_add(paused_duration)
+            .ok_or(Error::ArithmeticOverflow)?;
         env.storage()
             .persistent()
-            .set(&StreamKey::StartTime, &(start_time + paused_duration));
+            .set(&StreamKey::StartTime, &new_start_time);
         env.storage()
             .persistent()
-            .set(&StreamKey::EndTime, &(end_time + paused_duration));
+            .set(&StreamKey::EndTime, &new_end_time);
 
         env.storage().persistent().remove(&StreamKey::PausedAt);
         env.storage()
@@ -325,10 +345,10 @@ impl PaymentStream {
 
     /// Transfer any balance the recipient has earned up to this moment.
     /// Called during cancellation before returning funds to sender.
-    fn pay_out_earned_balance(env: &Env) {
+    fn pay_out_earned_balance(env: &Env) -> Result<(), Error> {
         let claimable = Self::calculate_claimable_balance(env);
         if claimable <= 0 {
-            return;
+            return Ok(());
         }
 
         let recipient: Address = env
@@ -342,18 +362,22 @@ impl PaymentStream {
             .persistent()
             .get(&StreamKey::TotalWithdrawn)
             .unwrap();
+        let new_total_withdrawn = total_withdrawn
+            .checked_add(claimable)
+            .ok_or(Error::ArithmeticOverflow)?;
 
         env.storage()
             .persistent()
-            .set(&StreamKey::TotalWithdrawn, &(total_withdrawn + claimable));
+            .set(&StreamKey::TotalWithdrawn, &new_total_withdrawn);
 
         let token_client = token::Client::new(env, &token);
         token_client.transfer(&env.current_contract_address(), &recipient, &claimable);
+        Ok(())
     }
 
     /// Transfer all unstreamed tokens back to the sender.
     /// Called during cancellation after paying out the recipient's earned balance.
-    fn return_remaining_to_sender(env: &Env) {
+    fn return_remaining_to_sender(env: &Env) -> Result<(), Error> {
         let total_funded: i128 = env
             .storage()
             .persistent()
@@ -364,16 +388,19 @@ impl PaymentStream {
             .persistent()
             .get(&StreamKey::TotalWithdrawn)
             .unwrap();
-        let remaining = total_funded - total_withdrawn;
+        let remaining = total_funded
+            .checked_sub(total_withdrawn)
+            .ok_or(Error::ArithmeticOverflow)?;
 
         if remaining <= 0 {
-            return;
+            return Ok(());
         }
 
         let sender: Address = env.storage().persistent().get(&StreamKey::Sender).unwrap();
         let token: Address = env.storage().persistent().get(&StreamKey::Token).unwrap();
         let token_client = token::Client::new(env, &token);
         token_client.transfer(&env.current_contract_address(), &sender, &remaining);
+        Ok(())
     }
 
     /// Calculate how many tokens are claimable at the current ledger timestamp.
@@ -416,11 +443,24 @@ impl PaymentStream {
             return 0;
         }
 
+        // calculate_claimable_balance stays infallible (both withdraw() and the view
+        // function get_claimable_balance call it), so an overflow here panics with the
+        // typed error directly rather than propagating a Result, unlike the arithmetic
+        // in the Result-returning functions above.
         let effective_end = now.min(end_time);
-        let elapsed = (effective_end - start_time) as i128;
-        let earned = (rate * elapsed).min(total_funded);
+        let elapsed = effective_end
+            .checked_sub(start_time)
+            .unwrap_or_else(|| panic_with_error!(env, Error::ArithmeticOverflow))
+            as i128;
+        let earned = rate
+            .checked_mul(elapsed)
+            .unwrap_or_else(|| panic_with_error!(env, Error::ArithmeticOverflow))
+            .min(total_funded);
 
-        (earned - total_withdrawn).max(0)
+        earned
+            .checked_sub(total_withdrawn)
+            .unwrap_or_else(|| panic_with_error!(env, Error::ArithmeticOverflow))
+            .max(0)
     }
 
     /// Return an error if the stream is not in Active status.

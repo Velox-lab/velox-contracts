@@ -508,3 +508,35 @@ fn withdraw_panics_while_paused() {
     client.pause_stream();
     client.withdraw();
 }
+
+// ── checked arithmetic ────────────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #10)")]
+fn get_claimable_balance_panics_on_overflow() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    // total_funded is unrelated to rate_per_second at initialize time, so an
+    // extreme rate can be set while funding only a small, realistic amount.
+    let token = create_funded_token(&env, &sender, 1000);
+
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.initialize(
+        &sender,
+        &recipient,
+        &token,
+        &i128::MAX, // rate per second
+        &1000_u64,
+        &2000_u64,
+        &1000_i128,
+    );
+
+    // 2 seconds elapsed: rate * elapsed = i128::MAX * 2 overflows i128.
+    env.ledger().with_mut(|li| li.timestamp = 1002);
+    client.get_claimable_balance();
+}
