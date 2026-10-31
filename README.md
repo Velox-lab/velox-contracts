@@ -41,8 +41,10 @@ The core streaming contract. Holds funds in escrow and releases them to the reci
 - `withdraw(recipient)` — recipient claims accrued balance
 - `cancel(sender)` — sender cancels and reclaims unstreamed funds
 - `top_up(sender, amount)` — sender adds more funds to extend the stream
+- `pause_stream(sender)` — sender pauses; claimable balance stops growing
+- `resume_stream(sender)` — sender resumes; the paused duration is added to start and end time so nothing is lost or double-counted
 - `get_claimable_balance(recipient)` — view how much is currently withdrawable
-- `get_stream_status()` — returns `Active`, `Completed`, or `Cancelled`
+- `get_stream_status()` — returns `Active`, `Paused`, `Completed`, or `Cancelled`
 
 ### `RecurringPayment`
 Handles fixed-interval recurring payments (e.g., weekly payroll, monthly subscriptions).
