@@ -1,7 +1,43 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, token, Address, Env,
+    contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, token,
+    Address, Env,
 };
+
+// ── Events ────────────────────────────────────────────────────────────────────
+
+#[contractevent]
+pub struct StreamCreated {
+    #[topic]
+    pub sender: Address,
+    #[topic]
+    pub recipient: Address,
+    pub token: Address,
+    pub rate_per_second: i128,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub total_funded: i128,
+}
+
+#[contractevent]
+pub struct Withdrawn {
+    #[topic]
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct StreamCancelled {
+    #[topic]
+    pub sender: Address,
+}
+
+#[contractevent]
+pub struct ToppedUp {
+    #[topic]
+    pub sender: Address,
+    pub amount: i128,
+}
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
@@ -124,6 +160,17 @@ impl PaymentStream {
         // Transfer funded tokens from sender into this contract
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&sender, env.current_contract_address(), &total_funded);
+
+        StreamCreated {
+            sender,
+            recipient,
+            token,
+            rate_per_second,
+            start_time,
+            end_time,
+            total_funded,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -160,6 +207,12 @@ impl PaymentStream {
         token_client.transfer(&env.current_contract_address(), &recipient, &claimable);
 
         Self::mark_completed_if_finished(&env);
+
+        Withdrawn {
+            recipient,
+            amount: claimable,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -176,6 +229,8 @@ impl PaymentStream {
         env.storage()
             .persistent()
             .set(&StreamKey::Status, &StreamStatus::Cancelled);
+
+        StreamCancelled { sender }.publish(&env);
         Ok(())
     }
 
@@ -219,6 +274,12 @@ impl PaymentStream {
         env.storage()
             .persistent()
             .set(&StreamKey::EndTime, &new_end_time);
+
+        ToppedUp {
+            sender,
+            amount: additional_amount,
+        }
+        .publish(&env);
         Ok(())
     }
 
