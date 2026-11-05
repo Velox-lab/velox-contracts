@@ -13,6 +13,7 @@ pub enum Error {
     FirstPaymentInPast = 4,
     ScheduleNotActive = 5,
     PaymentNotDue = 6,
+    ArithmeticOverflow = 7,
 }
 
 // ── Storage Keys ─────────────────────────────────────────────────────────────
@@ -142,10 +143,12 @@ impl RecurringPayment {
             .unwrap();
 
         // Advance next payment time before transferring, per the update-then-transfer rule
-        env.storage().persistent().set(
-            &ScheduleKey::NextPaymentTime,
-            &(next_payment_time + interval),
-        );
+        let new_next_payment_time = next_payment_time
+            .checked_add(interval)
+            .ok_or(Error::ArithmeticOverflow)?;
+        env.storage()
+            .persistent()
+            .set(&ScheduleKey::NextPaymentTime, &new_next_payment_time);
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(
