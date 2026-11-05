@@ -1,8 +1,11 @@
-use crate::{Error, PaymentStream, PaymentStreamClient, StreamStatus};
+use crate::{
+    Error, PaymentStream, PaymentStreamClient, StreamCancelled, StreamCreated, StreamStatus,
+    ToppedUp, Withdrawn,
+};
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
+    testutils::{Address as _, Events as _, Ledger},
     token::StellarAssetClient,
-    Address, Env,
+    Address, Env, Event,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -539,4 +542,93 @@ fn get_claimable_balance_panics_on_overflow() {
     // 2 seconds elapsed: rate * elapsed = i128::MAX * 2 overflows i128.
     env.ledger().with_mut(|li| li.timestamp = 1002);
     client.get_claimable_balance();
+}
+
+// ── events ────────────────────────────────────────────────────────────────
+
+/// The most recently published event, as XDR, regardless of which contract emitted it.
+/// Tests here only ever deploy one contract, so the last event in the whole
+/// environment is always this contract's.
+fn last_event(env: &Env) -> soroban_sdk::xdr::ContractEvent {
+    env.events().all().events().last().unwrap().clone()
+}
+
+#[test]
+fn initialize_emits_stream_created_event() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_funded_token(&env, &sender, 10_000);
+
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.initialize(
+        &sender, &recipient, &token, &10_i128, &1000_u64, &1100_u64, &1000_i128,
+    );
+
+    let expected = StreamCreated {
+        sender: sender.clone(),
+        recipient: recipient.clone(),
+        token: token.clone(),
+        rate_per_second: 10,
+        start_time: 1000,
+        end_time: 1100,
+        total_funded: 1000,
+    };
+    assert_eq!(last_event(&env), expected.to_xdr(&env, &contract_id));
+}
+
+#[test]
+fn withdraw_emits_withdrawn_event_with_claimed_amount() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    let (_, recipient, _) = setup_stream(&env, &client);
+
+    env.ledger().with_mut(|li| li.timestamp = 1050);
+    client.withdraw();
+
+    let expected = Withdrawn {
+        recipient: recipient.clone(),
+        amount: 500,
+    };
+    assert_eq!(last_event(&env), expected.to_xdr(&env, &contract_id));
+}
+
+#[test]
+fn cancel_emits_stream_cancelled_event() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    let (sender, _, _) = setup_stream(&env, &client);
+
+    env.ledger().with_mut(|li| li.timestamp = 1050);
+    client.cancel();
+
+    let expected = StreamCancelled {
+        sender: sender.clone(),
+    };
+    assert_eq!(last_event(&env), expected.to_xdr(&env, &contract_id));
+}
+
+#[test]
+fn top_up_emits_topped_up_event_with_additional_amount() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    let (sender, _, _) = setup_stream(&env, &client);
+
+    client.top_up(&250_i128);
+
+    let expected = ToppedUp {
+        sender: sender.clone(),
+        amount: 250,
+    };
+    assert_eq!(last_event(&env), expected.to_xdr(&env, &contract_id));
 }

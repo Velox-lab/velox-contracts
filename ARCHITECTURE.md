@@ -187,6 +187,21 @@ velox-frontend  ──▶ VeloxRegistry.list_streams_by_sender(address)
 
 ---
 
+## Events
+
+`PaymentStream` publishes a typed event (via `#[contractevent]`) from each function that changes state, so off-chain services and frontends can subscribe instead of polling:
+
+| Function | Event | Topics | Data |
+|----------|-------|--------|------|
+| `initialize()` | `StreamCreated` | `sender`, `recipient` | `token`, `rate_per_second`, `start_time`, `end_time`, `total_funded` |
+| `withdraw()` | `Withdrawn` | `recipient` | `amount` |
+| `cancel()` | `StreamCancelled` | `sender` | — |
+| `top_up()` | `ToppedUp` | `sender` | `amount` |
+
+`pause_stream()` and `resume_stream()` do not yet emit events — tracked as follow-up work, not yet done. `RecurringPayment`, `StreamFactory` and `VeloxRegistry` emit no events at all yet; also tracked as follow-up.
+
+---
+
 ## Storage Design
 
 Each contract uses Soroban's key-value storage. Storage keys are typed enums to prevent collision and improve readability.
