@@ -1,8 +1,11 @@
-use crate::{Error, RecurringPayment, RecurringPaymentClient, ScheduleStatus};
+use crate::{
+    Error, PaymentExecuted, RecurringPayment, RecurringPaymentClient, ScheduleCancelled,
+    ScheduleCreated, ScheduleStatus,
+};
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
+    testutils::{Address as _, Events as _, Ledger},
     token::{StellarAssetClient, TokenClient},
-    Address, Env,
+    Address, Env, Event,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -389,4 +392,95 @@ fn execute_payment_panics_when_next_payment_time_overflows() {
     // (u64::MAX - 5) + u64::MAX overflows u64.
     env.ledger().with_mut(|li| li.timestamp = u64::MAX - 5);
     client.execute_payment();
+}
+
+// ── events ────────────────────────────────────────────────────────────────
+
+/// The most recently published event from this contract specifically, ignoring
+/// any events the token contract published in between (e.g. setup_schedule's
+/// mint/approve calls happen on the token, not on the schedule contract).
+fn last_event(env: &Env, contract_id: &Address) -> soroban_sdk::xdr::ContractEvent {
+    env.events()
+        .all()
+        .filter_by_contract(contract_id)
+        .events()
+        .last()
+        .unwrap()
+        .clone()
+}
+
+#[test]
+fn initialize_emits_schedule_created_event() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = RecurringPaymentClient::new(&env, &contract_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1_000_000);
+    client.initialize(
+        &sender,
+        &recipient,
+        &token,
+        &100_i128,
+        &604_800_u64,
+        &1_604_800_u64,
+    );
+
+    let expected = ScheduleCreated {
+        sender: sender.clone(),
+        recipient: recipient.clone(),
+        token: token.clone(),
+        amount: 100,
+        interval: 604_800,
+        first_payment_time: 1_604_800,
+    };
+    assert_eq!(
+        last_event(&env, &contract_id),
+        expected.to_xdr(&env, &contract_id)
+    );
+}
+
+#[test]
+fn execute_payment_emits_payment_executed_event() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = RecurringPaymentClient::new(&env, &contract_id);
+
+    let (_, recipient, _) = setup_schedule(&env, &client);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_604_800);
+    client.execute_payment();
+
+    let expected = PaymentExecuted {
+        recipient: recipient.clone(),
+        amount: 100,
+    };
+    assert_eq!(
+        last_event(&env, &contract_id),
+        expected.to_xdr(&env, &contract_id)
+    );
+}
+
+#[test]
+fn cancel_emits_schedule_cancelled_event() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = RecurringPaymentClient::new(&env, &contract_id);
+
+    let (sender, _, _) = setup_schedule(&env, &client);
+
+    env.mock_all_auths();
+    client.cancel();
+
+    let expected = ScheduleCancelled {
+        sender: sender.clone(),
+    };
+    assert_eq!(
+        last_event(&env, &contract_id),
+        expected.to_xdr(&env, &contract_id)
+    );
 }

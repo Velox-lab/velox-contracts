@@ -1,5 +1,34 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, Env};
+use soroban_sdk::{
+    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env,
+};
+
+// ── Events ────────────────────────────────────────────────────────────────────
+
+#[contractevent]
+pub struct ScheduleCreated {
+    #[topic]
+    pub sender: Address,
+    #[topic]
+    pub recipient: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub interval: u64,
+    pub first_payment_time: u64,
+}
+
+#[contractevent]
+pub struct PaymentExecuted {
+    #[topic]
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct ScheduleCancelled {
+    #[topic]
+    pub sender: Address,
+}
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
@@ -97,6 +126,16 @@ impl RecurringPayment {
         storage.set(&ScheduleKey::Interval, &interval);
         storage.set(&ScheduleKey::NextPaymentTime, &first_payment_time);
         storage.set(&ScheduleKey::Status, &ScheduleStatus::Active);
+
+        ScheduleCreated {
+            sender,
+            recipient,
+            token,
+            amount,
+            interval,
+            first_payment_time,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -157,6 +196,8 @@ impl RecurringPayment {
             &recipient,
             &amount,
         );
+
+        PaymentExecuted { recipient, amount }.publish(&env);
         Ok(())
     }
 
@@ -174,6 +215,8 @@ impl RecurringPayment {
         env.storage()
             .persistent()
             .set(&ScheduleKey::Status, &ScheduleStatus::Cancelled);
+
+        ScheduleCancelled { sender }.publish(&env);
         Ok(())
     }
 
