@@ -198,7 +198,17 @@ velox-frontend  ──▶ VeloxRegistry.list_streams_by_sender(address)
 | `cancel()` | `StreamCancelled` | `sender` | — |
 | `top_up()` | `ToppedUp` | `sender` | `amount` |
 
-`pause_stream()` and `resume_stream()` do not yet emit events — tracked as follow-up work, not yet done. `RecurringPayment`, `StreamFactory` and `VeloxRegistry` emit no events at all yet; also tracked as follow-up.
+`pause_stream()` and `resume_stream()` do not yet emit events — tracked as follow-up work, not yet done.
+
+`RecurringPayment` likewise publishes a typed event from each state-changing function:
+
+| Function | Event | Topics | Data |
+|----------|-------|--------|------|
+| `initialize()` | `ScheduleCreated` | `sender`, `recipient` | `token`, `amount`, `interval`, `first_payment_time` |
+| `execute_payment()` | `PaymentExecuted` | `recipient` | `amount` |
+| `cancel()` | `ScheduleCancelled` | `sender` | — |
+
+`StreamFactory` and `VeloxRegistry` emit no events at all yet; tracked as follow-up.
 
 ---
 
