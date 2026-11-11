@@ -243,6 +243,12 @@ Each contract uses Soroban's key-value storage. Storage keys are typed enums to 
 | `NextPaymentTime` | `u64` | Unix timestamp of next payment |
 | `Status` | `ScheduleStatus` | Active / Cancelled / Completed |
 
+### Storage TTL
+
+Soroban persistent entries expire after a number of ledgers and become inaccessible past that point, so a long-running stream or schedule that nobody touches would eventually lose its state. `PaymentStream.withdraw()`/`top_up()` and `RecurringPayment.execute_payment()` each bump every storage key they own back up to ~30 days of remaining TTL whenever the current TTL drops below ~7 days (`TTL_THRESHOLD`/`TTL_EXTEND_TO` in each contract, assuming a 5-second ledger close time). A stream that's actively being withdrawn from, or a schedule that's actively executing, never expires as a side effect of that activity.
+
+This doesn't cover every path: `pause_stream()`/`resume_stream()`/`cancel()` on PaymentStream and `cancel()` on RecurringPayment don't bump the TTL, and a stream or schedule that goes completely untouched for the full TTL window (no withdrawal, no top-up, no execution) still expires — the fix here is reactive to usage, not a standing guarantee. Tracked as follow-up, not silently assumed to be fully solved.
+
 ---
 
 ## Security Considerations

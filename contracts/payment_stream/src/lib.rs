@@ -57,6 +57,18 @@ pub enum Error {
     ArithmeticOverflow = 10,
 }
 
+// ── Storage TTL ───────────────────────────────────────────────────────────────
+//
+// Soroban persistent entries expire after a number of ledgers and are
+// inaccessible past that point, so a long-running stream must have its
+// storage TTL bumped periodically or it would lose its state entirely.
+// Assuming a 5-second ledger close time: 1 day ≈ 17_280 ledgers.
+
+/// Bump when the remaining TTL drops below ~7 days.
+const TTL_THRESHOLD: u32 = 120_960;
+/// Bump up to ~30 days of TTL remaining.
+const TTL_EXTEND_TO: u32 = 518_400;
+
 // ── Storage Keys ─────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -207,6 +219,7 @@ impl PaymentStream {
         token_client.transfer(&env.current_contract_address(), &recipient, &claimable);
 
         Self::mark_completed_if_finished(&env);
+        Self::extend_storage_ttl(&env);
 
         Withdrawn {
             recipient,
@@ -274,6 +287,7 @@ impl PaymentStream {
         env.storage()
             .persistent()
             .set(&StreamKey::EndTime, &new_end_time);
+        Self::extend_storage_ttl(&env);
 
         ToppedUp {
             sender,
@@ -553,6 +567,24 @@ impl PaymentStream {
                 .persistent()
                 .set(&StreamKey::Status, &StreamStatus::Completed);
         }
+    }
+
+    /// Bump the TTL of every storage entry this stream owns, so a long-running
+    /// stream that keeps getting withdrawn from or topped up never loses its
+    /// state to Soroban's persistent-entry expiry. Excludes PausedAt: it only
+    /// exists while Paused, and this is only called from functions that require
+    /// Active status, so the key wouldn't exist yet and extend_ttl would panic.
+    fn extend_storage_ttl(env: &Env) {
+        let storage = env.storage().persistent();
+        storage.extend_ttl(&StreamKey::Sender, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&StreamKey::Recipient, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&StreamKey::Token, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&StreamKey::RatePerSecond, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&StreamKey::StartTime, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&StreamKey::EndTime, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&StreamKey::TotalFunded, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&StreamKey::TotalWithdrawn, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&StreamKey::Status, TTL_THRESHOLD, TTL_EXTEND_TO);
     }
 }
 

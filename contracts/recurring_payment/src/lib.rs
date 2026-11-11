@@ -45,6 +45,18 @@ pub enum Error {
     ArithmeticOverflow = 7,
 }
 
+// ── Storage TTL ───────────────────────────────────────────────────────────────
+//
+// Soroban persistent entries expire after a number of ledgers and are
+// inaccessible past that point, so a long-running schedule must have its
+// storage TTL bumped periodically or it would lose its state entirely.
+// Assuming a 5-second ledger close time: 1 day ≈ 17_280 ledgers.
+
+/// Bump when the remaining TTL drops below ~7 days.
+const TTL_THRESHOLD: u32 = 120_960;
+/// Bump up to ~30 days of TTL remaining.
+const TTL_EXTEND_TO: u32 = 518_400;
+
 // ── Storage Keys ─────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -196,6 +208,7 @@ impl RecurringPayment {
             &recipient,
             &amount,
         );
+        Self::extend_storage_ttl(&env);
 
         PaymentExecuted { recipient, amount }.publish(&env);
         Ok(())
@@ -279,6 +292,20 @@ impl RecurringPayment {
             return Err(Error::ScheduleNotActive);
         }
         Ok(())
+    }
+
+    /// Bump the TTL of every storage entry this schedule owns, so a
+    /// long-running schedule that keeps executing payments never loses its
+    /// state to Soroban's persistent-entry expiry.
+    fn extend_storage_ttl(env: &Env) {
+        let storage = env.storage().persistent();
+        storage.extend_ttl(&ScheduleKey::Sender, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&ScheduleKey::Recipient, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&ScheduleKey::Token, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&ScheduleKey::Amount, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&ScheduleKey::Interval, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&ScheduleKey::NextPaymentTime, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&ScheduleKey::Status, TTL_THRESHOLD, TTL_EXTEND_TO);
     }
 }
 
