@@ -1,9 +1,9 @@
 use crate::{
-    Error, PaymentStream, PaymentStreamClient, StreamCancelled, StreamCreated, StreamStatus,
-    ToppedUp, Withdrawn,
+    Error, PaymentStream, PaymentStreamClient, StreamCancelled, StreamCreated, StreamKey,
+    StreamStatus, ToppedUp, Withdrawn, TTL_EXTEND_TO,
 };
 use soroban_sdk::{
-    testutils::{Address as _, Events as _, Ledger},
+    testutils::{storage::Persistent as _, Address as _, Events as _, Ledger},
     token::StellarAssetClient,
     Address, Env, Event,
 };
@@ -631,4 +631,46 @@ fn top_up_emits_topped_up_event_with_additional_amount() {
         amount: 250,
     };
     assert_eq!(last_event(&env), expected.to_xdr(&env, &contract_id));
+}
+
+// ── storage TTL ─────────────────────────────────────────────────────────────
+
+#[test]
+fn withdraw_extends_storage_ttl() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    // Simulate time passing: advance the ledger sequence far enough that,
+    // without a bump, the entry would be left with far less TTL than our
+    // threshold (well below it, so the next call is guaranteed to bump).
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 2000;
+        li.timestamp = 1050;
+    });
+    client.withdraw();
+
+    let ttl = env.as_contract(&contract_id, || {
+        env.storage().persistent().get_ttl(&StreamKey::Status)
+    });
+    assert_eq!(ttl, TTL_EXTEND_TO);
+}
+
+#[test]
+fn top_up_extends_storage_ttl() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.ledger().with_mut(|li| li.sequence_number = 2000);
+    client.top_up(&250_i128);
+
+    let ttl = env.as_contract(&contract_id, || {
+        env.storage().persistent().get_ttl(&StreamKey::TotalFunded)
+    });
+    assert_eq!(ttl, TTL_EXTEND_TO);
 }
