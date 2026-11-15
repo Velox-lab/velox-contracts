@@ -207,6 +207,98 @@ fn claimable_balance_is_capped_at_total_funded() {
     assert_eq!(client.get_claimable_balance(), 1000_i128); // capped at funded
 }
 
+#[test]
+fn claimable_balance_is_exact_when_rate_does_not_divide_evenly_into_total_funded() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    // total_funded (1000) is not a multiple of rate_per_second (3), so the
+    // stream would never earn out to an exact round number — this checks the
+    // earned amount is still exact (rate * elapsed, no truncation) well
+    // before the total_funded cap would even come into play.
+    let token = create_funded_token(&env, &sender, 1000);
+
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.initialize(
+        &sender, &recipient, &token, &3_i128, &1000_u64, &2000_u64, &1000_i128,
+    );
+
+    env.ledger().with_mut(|li| li.timestamp = 1007); // 7 seconds elapsed
+    assert_eq!(client.get_claimable_balance(), 21_i128); // 3/sec * 7
+}
+
+#[test]
+fn claimable_balance_is_zero_exactly_at_start_time() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.ledger().with_mut(|li| li.timestamp = 1000); // exactly start_time
+    assert_eq!(client.get_claimable_balance(), 0_i128);
+}
+
+#[test]
+fn claimable_balance_equals_total_funded_exactly_at_end_time() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.ledger().with_mut(|li| li.timestamp = 1100); // exactly end_time
+    assert_eq!(client.get_claimable_balance(), 1000_i128);
+}
+
+#[test]
+fn claimable_balance_reflects_remaining_amount_after_multiple_partial_withdrawals() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    setup_stream(&env, &client);
+
+    env.ledger().with_mut(|li| li.timestamp = 1030); // 300 earned
+    env.mock_all_auths();
+    client.withdraw();
+
+    env.ledger().with_mut(|li| li.timestamp = 1060); // 600 earned, 300 withdrawn
+    client.withdraw();
+
+    env.ledger().with_mut(|li| li.timestamp = 1080); // 800 earned, 600 withdrawn
+    assert_eq!(client.get_claimable_balance(), 200_i128);
+}
+
+#[test]
+fn claimable_balance_with_minimum_total_funded_of_one() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = PaymentStreamClient::new(&env, &contract_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = create_funded_token(&env, &sender, 1);
+
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.initialize(
+        &sender, &recipient, &token, &1_i128, &1000_u64, &2000_u64, &1_i128,
+    );
+
+    // 1 second in: rate * elapsed = 1, already equal to the 1-unit cap.
+    env.ledger().with_mut(|li| li.timestamp = 1001);
+    assert_eq!(client.get_claimable_balance(), 1_i128);
+
+    // Long after: still capped at the same 1 unit, never grows past it.
+    env.ledger().with_mut(|li| li.timestamp = 5000);
+    assert_eq!(client.get_claimable_balance(), 1_i128);
+}
+
 // ── withdraw ──────────────────────────────────────────────────────────────
 
 #[test]
