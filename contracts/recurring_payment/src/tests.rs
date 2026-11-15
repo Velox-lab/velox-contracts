@@ -1,9 +1,9 @@
 use crate::{
     Error, PaymentExecuted, RecurringPayment, RecurringPaymentClient, ScheduleCancelled,
-    ScheduleCreated, ScheduleStatus,
+    ScheduleCreated, ScheduleKey, ScheduleStatus, TTL_EXTEND_TO,
 };
 use soroban_sdk::{
-    testutils::{Address as _, Events as _, Ledger},
+    testutils::{storage::Persistent as _, Address as _, Events as _, Ledger},
     token::{StellarAssetClient, TokenClient},
     Address, Env, Event,
 };
@@ -483,4 +483,29 @@ fn cancel_emits_schedule_cancelled_event() {
         last_event(&env, &contract_id),
         expected.to_xdr(&env, &contract_id)
     );
+}
+
+// ── storage TTL ─────────────────────────────────────────────────────────────
+
+#[test]
+fn execute_payment_extends_storage_ttl() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = RecurringPaymentClient::new(&env, &contract_id);
+
+    setup_schedule(&env, &client);
+
+    // Simulate time passing: advance the ledger sequence far enough that,
+    // without a bump, the entry would be left with far less TTL than our
+    // threshold (well below it, so the next call is guaranteed to bump).
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 2000;
+        li.timestamp = 1_604_800;
+    });
+    client.execute_payment();
+
+    let ttl = env.as_contract(&contract_id, || {
+        env.storage().persistent().get_ttl(&ScheduleKey::Status)
+    });
+    assert_eq!(ttl, TTL_EXTEND_TO);
 }
