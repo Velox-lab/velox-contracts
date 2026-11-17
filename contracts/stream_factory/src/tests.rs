@@ -454,3 +454,79 @@ fn schedule_created_by_factory_executes_after_approval() {
 
     assert_eq!(token.balance(&d.recipient), 100);
 }
+
+// ── full stream lifecycle ─────────────────────────────────────────────────
+
+/// Covers the full PaymentStream lifecycle end to end through a real
+/// deployed instance: create via the factory, read claimable balance before
+/// and after start, withdraw, top up, and cancel — checking the final state
+/// and every token balance involved. Uses USDC-scale amounts (7 decimals)
+/// and a realistic Unix timestamp, not toy round numbers, per the issue.
+#[test]
+fn full_stream_lifecycle_through_withdraw_top_up_and_cancel() {
+    let env = create_env();
+    let d = setup_deployed_factory(&env);
+
+    const USDC: i128 = 10_000_000; // 1 USDC in base units (7 decimals)
+    let start_time = 1_700_000_000_u64; // a realistic Unix timestamp
+    let duration_secs = 1000_u64;
+    let rate_per_second = USDC; // 1 USDC/sec
+    let total_funded = rate_per_second * duration_secs as i128; // 1000 USDC
+
+    // The sender needs enough for the initial funding plus the top-up below
+    // (1000 + 500 USDC); setup_deployed_factory already minted 10_000
+    // (unitless) to the sender, so top that up to exactly 1500 USDC.
+    StellarAssetClient::new(&env, &d.token).mint(&d.sender, &(1500 * USDC - 10_000));
+
+    // 1. Create the stream through StreamFactory.
+    env.ledger().with_mut(|li| li.timestamp = start_time);
+    let stream_id = d.factory.create_stream(
+        &d.sender,
+        &d.recipient,
+        &d.token,
+        &rate_per_second,
+        &start_time,
+        &(start_time + duration_secs),
+        &total_funded,
+    );
+    let stream = payment_stream_wasm::Client::new(&env, &stream_id);
+    let token = TokenClient::new(&env, &d.token);
+
+    assert_eq!(token.balance(&d.sender), 500 * USDC); // 1500 - 1000 escrowed
+
+    // 2. Claimable balance before start is zero.
+    assert_eq!(stream.get_claimable_balance(), 0);
+
+    // 3. Advance ledger time into the stream.
+    env.ledger().with_mut(|li| li.timestamp = start_time + 400);
+
+    // 4. Claimable balance after start reflects elapsed time.
+    assert_eq!(stream.get_claimable_balance(), 400 * USDC);
+
+    // 5. Withdraw: recipient receives everything earned so far.
+    stream.withdraw();
+    assert_eq!(token.balance(&d.recipient), 400 * USDC);
+    assert_eq!(stream.get_claimable_balance(), 0);
+
+    // 6. Top up: extends total_funded and end_time proportionally.
+    stream.top_up(&(500 * USDC));
+    assert_eq!(token.balance(&d.sender), 0); // the full 1500 is now escrowed
+    let info = stream.get_stream_info();
+    assert_eq!(info.total_funded, 1500 * USDC);
+    assert_eq!(info.end_time, start_time + duration_secs + 500); // +500s from the top-up
+
+    // 7. Advance further, then cancel: pays out what's been earned since the
+    // last withdrawal, then returns the untouched remainder to the sender.
+    env.ledger().with_mut(|li| li.timestamp = start_time + 900);
+    stream.cancel();
+
+    // 8. Verify final state.
+    assert_eq!(
+        stream.get_stream_status(),
+        payment_stream_wasm::StreamStatus::Cancelled
+    );
+    assert_eq!(token.balance(&d.recipient), 900 * USDC); // 400 withdrawn + 500 at cancel
+    assert_eq!(token.balance(&d.sender), 600 * USDC); // untouched remainder of the 1500 funded
+    assert_eq!(token.balance(&stream_id), 0); // escrow fully drained
+    assert_eq!(stream.get_total_withdrawn(), 900 * USDC);
+}
