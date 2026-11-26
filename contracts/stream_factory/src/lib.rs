@@ -28,6 +28,7 @@ pub trait PaymentStreamInterface {
 
 #[contractclient(name = "RecurringPaymentClient")]
 pub trait RecurringPaymentInterface {
+    #[allow(clippy::too_many_arguments)]
     fn initialize(
         env: Env,
         sender: Address,
@@ -36,6 +37,7 @@ pub trait RecurringPaymentInterface {
         amount: i128,
         interval: u64,
         first_payment_time: u64,
+        total_payments: u32,
     );
 }
 
@@ -160,6 +162,10 @@ impl StreamFactory {
     ///
     /// Payments are pulled from the sender's allowance, so the sender must
     /// separately `approve` the returned schedule address on the token.
+    ///
+    /// `total_payments` is forwarded as-is; `0` means the schedule runs until
+    /// the sender cancels it.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_schedule(
         env: Env,
         sender: Address,
@@ -168,6 +174,7 @@ impl StreamFactory {
         amount: i128,
         interval: u64,
         first_payment_time: u64,
+        total_payments: u32,
     ) -> Address {
         sender.require_auth();
 
@@ -192,6 +199,7 @@ impl StreamFactory {
             &amount,
             &interval,
             &first_payment_time,
+            &total_payments,
         );
 
         Self::registry_client(&env).register_schedule(&ScheduleEntry {

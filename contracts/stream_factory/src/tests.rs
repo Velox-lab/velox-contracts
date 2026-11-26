@@ -13,6 +13,8 @@ use soroban_sdk::{
 mod payment_stream_wasm {
     soroban_sdk::contractimport!(file = "../../target/wasm32v1-none/release/payment_stream.wasm");
 }
+// RecurringPayment::initialize has 7 parameters; same reasoning as above.
+#[allow(clippy::too_many_arguments)]
 mod recurring_payment_wasm {
     soroban_sdk::contractimport!(
         file = "../../target/wasm32v1-none/release/recurring_payment.wasm"
@@ -226,6 +228,7 @@ fn create_schedule_panics_when_amount_is_zero() {
         &0_i128,
         &604_800_u64,
         &1_604_800_u64,
+        &0_u32,
     );
 }
 
@@ -246,6 +249,7 @@ fn create_schedule_panics_when_interval_is_zero() {
         &100_i128,
         &0_u64,
         &1_604_800_u64,
+        &0_u32,
     );
 }
 
@@ -394,6 +398,7 @@ fn create_schedule_initializes_deployed_schedule() {
         &100_i128,
         &604_800_u64,
         &1_604_800_u64,
+        &0_u32,
     );
 
     let info = recurring_payment_wasm::Client::new(&env, &schedule_id).get_schedule_info();
@@ -419,6 +424,7 @@ fn create_schedule_registers_schedule_in_registry() {
         &100_i128,
         &604_800_u64,
         &1_604_800_u64,
+        &0_u32,
     );
 
     let all = d.registry.get_all_schedules();
@@ -443,6 +449,7 @@ fn schedule_created_by_factory_executes_after_approval() {
         &100_i128,
         &604_800_u64,
         &1_604_800_u64,
+        &0_u32,
     );
 
     let token = TokenClient::new(&env, &d.token);

@@ -1,6 +1,6 @@
 use crate::{
     Error, PaymentExecuted, RecurringPayment, RecurringPaymentClient, ScheduleCancelled,
-    ScheduleCreated, ScheduleKey, ScheduleStatus, TTL_EXTEND_TO,
+    ScheduleCompleted, ScheduleCreated, ScheduleKey, ScheduleStatus, TTL_EXTEND_TO,
 };
 use soroban_sdk::{
     testutils::{storage::Persistent as _, Address as _, Events as _, Ledger},
@@ -44,6 +44,7 @@ fn setup_schedule(env: &Env, client: &RecurringPaymentClient) -> (Address, Addre
         &100_i128,      // amount per interval
         &604_800_u64,   // interval: 7 days in seconds
         &1_604_800_u64, // first payment in ~7 days
+        &0_u32,         // unlimited payments
     );
 
     // Sender allows the schedule to pull up to 1_000 tokens (10 payments)
@@ -108,6 +109,7 @@ fn initialize_panics_when_amount_is_zero() {
         &0,
         &604_800_u64,
         &1_604_800_u64,
+        &0_u32,
     );
 }
 
@@ -124,7 +126,15 @@ fn initialize_panics_when_interval_is_zero() {
 
     env.mock_all_auths();
     env.ledger().with_mut(|li| li.timestamp = 1_000_000);
-    client.initialize(&sender, &recipient, &token, &100, &0_u64, &1_604_800_u64);
+    client.initialize(
+        &sender,
+        &recipient,
+        &token,
+        &100,
+        &0_u64,
+        &1_604_800_u64,
+        &0_u32,
+    );
 }
 
 #[test]
@@ -146,6 +156,7 @@ fn initialize_returns_typed_error_when_amount_is_zero() {
         &0,
         &604_800_u64,
         &1_604_800_u64,
+        &0_u32,
     );
 
     assert_eq!(result, Err(Ok(Error::AmountMustBePositive)));
@@ -170,6 +181,7 @@ fn initialize_returns_typed_error_when_first_payment_is_in_the_past() {
         &100,
         &604_800_u64,
         &999_999_u64,
+        &0_u32,
     );
 
     assert_eq!(result, Err(Ok(Error::FirstPaymentInPast)));
@@ -212,6 +224,7 @@ fn initialize_panics_when_called_twice() {
         &1,
         &1_u64,
         &1_604_800_u64,
+        &0_u32,
     );
 }
 
@@ -298,6 +311,8 @@ fn get_schedule_info_returns_all_fields_correctly() {
     assert_eq!(info.amount, 100_i128);
     assert_eq!(info.interval, 604_800_u64);
     assert_eq!(info.next_payment_time, 1_604_800_u64);
+    assert_eq!(info.total_payments, 0_u32);
+    assert_eq!(info.payments_made, 0_u32);
 }
 
 #[test]
@@ -383,6 +398,7 @@ fn execute_payment_panics_when_next_payment_time_overflows() {
         &100_i128,
         &u64::MAX,       // interval
         &(u64::MAX - 5), // first_payment_time
+        &0_u32,
     );
 
     let expiration_ledger = env.ledger().sequence() + 100_000;
@@ -392,6 +408,111 @@ fn execute_payment_panics_when_next_payment_time_overflows() {
     // (u64::MAX - 5) + u64::MAX overflows u64.
     env.ledger().with_mut(|li| li.timestamp = u64::MAX - 5);
     client.execute_payment();
+}
+
+// ── payment cap / completion ─────────────────────────────────────────────
+
+/// Sets up a schedule capped at `total_payments` payments of 100 tokens
+/// every 604800 seconds, starting at `1_604_800`. Mints enough tokens and
+/// approves enough allowance to cover every capped payment.
+fn setup_capped_schedule(
+    env: &Env,
+    client: &RecurringPaymentClient,
+    total_payments: u32,
+) -> (Address, Address, Address) {
+    let sender = Address::generate(env);
+    let recipient = Address::generate(env);
+    let token = create_funded_token(env, &sender, 10_000);
+
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 1_000_000);
+
+    client.initialize(
+        &sender,
+        &recipient,
+        &token,
+        &100_i128,
+        &604_800_u64,
+        &1_604_800_u64,
+        &total_payments,
+    );
+
+    let expiration_ledger = env.ledger().sequence() + 100_000;
+    TokenClient::new(env, &token).approve(&sender, &client.address, &1_000, &expiration_ledger);
+
+    (sender, recipient, token)
+}
+
+#[test]
+fn execute_payment_stays_active_below_the_cap() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = RecurringPaymentClient::new(&env, &contract_id);
+
+    setup_capped_schedule(&env, &client, 2);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_604_800);
+    client.execute_payment();
+
+    assert_eq!(client.get_payments_made(), 1_u32);
+    assert_eq!(client.get_schedule_status(), ScheduleStatus::Active);
+}
+
+#[test]
+fn execute_payment_completes_schedule_on_final_payment() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = RecurringPaymentClient::new(&env, &contract_id);
+
+    setup_capped_schedule(&env, &client, 2);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_604_800);
+    client.execute_payment();
+    env.ledger()
+        .with_mut(|li| li.timestamp = 1_604_800 + 604_800);
+    client.execute_payment();
+
+    assert_eq!(client.get_payments_made(), 2_u32);
+    assert_eq!(client.get_total_payments(), 2_u32);
+    assert_eq!(client.get_schedule_status(), ScheduleStatus::Completed);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn execute_payment_panics_on_completed_schedule() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = RecurringPaymentClient::new(&env, &contract_id);
+
+    setup_capped_schedule(&env, &client, 1);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_604_800);
+    client.execute_payment(); // completes the schedule
+
+    env.ledger()
+        .with_mut(|li| li.timestamp = 1_604_800 + 604_800);
+    client.execute_payment(); // should panic — schedule already completed
+}
+
+#[test]
+fn execute_payment_emits_schedule_completed_event_on_final_payment() {
+    let env = create_env();
+    let contract_id = register_contract(&env);
+    let client = RecurringPaymentClient::new(&env, &contract_id);
+
+    let (sender, _, _) = setup_capped_schedule(&env, &client, 1);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_604_800);
+    client.execute_payment();
+
+    let expected = ScheduleCompleted {
+        sender,
+        payments_made: 1,
+    };
+    assert_eq!(
+        last_event(&env, &contract_id),
+        expected.to_xdr(&env, &contract_id)
+    );
 }
 
 // ── events ────────────────────────────────────────────────────────────────
@@ -428,6 +549,7 @@ fn initialize_emits_schedule_created_event() {
         &100_i128,
         &604_800_u64,
         &1_604_800_u64,
+        &0_u32,
     );
 
     let expected = ScheduleCreated {

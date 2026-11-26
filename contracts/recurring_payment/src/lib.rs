@@ -30,6 +30,13 @@ pub struct ScheduleCancelled {
     pub sender: Address,
 }
 
+#[contractevent]
+pub struct ScheduleCompleted {
+    #[topic]
+    pub sender: Address,
+    pub payments_made: u32,
+}
+
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 #[contracterror]
@@ -68,6 +75,8 @@ pub enum ScheduleKey {
     Interval,
     NextPaymentTime,
     Status,
+    TotalPayments,
+    PaymentsMade,
 }
 
 // ── Data Types ────────────────────────────────────────────────────────────────
@@ -91,6 +100,8 @@ pub struct ScheduleInfo {
     pub interval: u64,
     pub next_payment_time: u64,
     pub status: ScheduleStatus,
+    pub total_payments: u32,
+    pub payments_made: u32,
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -106,6 +117,11 @@ impl RecurringPayment {
     /// The schedule pulls each payment from the sender via `transfer_from`, so the
     /// sender must also call `approve` on the token with this contract as spender.
     /// The approved amount caps the total the schedule can ever pay out.
+    ///
+    /// `total_payments` caps how many times `execute_payment` will succeed before
+    /// the schedule moves itself to `Completed`; `0` means unlimited (the sender
+    /// must `cancel()` to stop it).
+    #[allow(clippy::too_many_arguments)]
     pub fn initialize(
         env: Env,
         sender: Address,
@@ -114,6 +130,7 @@ impl RecurringPayment {
         amount: i128,
         interval: u64,
         first_payment_time: u64,
+        total_payments: u32,
     ) -> Result<(), Error> {
         sender.require_auth();
 
@@ -138,6 +155,8 @@ impl RecurringPayment {
         storage.set(&ScheduleKey::Interval, &interval);
         storage.set(&ScheduleKey::NextPaymentTime, &first_payment_time);
         storage.set(&ScheduleKey::Status, &ScheduleStatus::Active);
+        storage.set(&ScheduleKey::TotalPayments, &total_payments);
+        storage.set(&ScheduleKey::PaymentsMade, &0_u32);
 
         ScheduleCreated {
             sender,
@@ -208,9 +227,43 @@ impl RecurringPayment {
             &recipient,
             &amount,
         );
+
+        let total_payments: u32 = env
+            .storage()
+            .persistent()
+            .get(&ScheduleKey::TotalPayments)
+            .unwrap();
+        let previous_payments_made: u32 = env
+            .storage()
+            .persistent()
+            .get(&ScheduleKey::PaymentsMade)
+            .unwrap();
+        let payments_made: u32 = previous_payments_made + 1;
+        env.storage()
+            .persistent()
+            .set(&ScheduleKey::PaymentsMade, &payments_made);
+
+        if total_payments > 0 && payments_made >= total_payments {
+            env.storage()
+                .persistent()
+                .set(&ScheduleKey::Status, &ScheduleStatus::Completed);
+        }
+
         Self::extend_storage_ttl(&env);
 
-        PaymentExecuted { recipient, amount }.publish(&env);
+        PaymentExecuted {
+            recipient: recipient.clone(),
+            amount,
+        }
+        .publish(&env);
+
+        if total_payments > 0 && payments_made >= total_payments {
+            ScheduleCompleted {
+                sender,
+                payments_made,
+            }
+            .publish(&env);
+        }
         Ok(())
     }
 
@@ -276,7 +329,26 @@ impl RecurringPayment {
             interval: storage.get(&ScheduleKey::Interval).unwrap(),
             next_payment_time: storage.get(&ScheduleKey::NextPaymentTime).unwrap(),
             status: storage.get(&ScheduleKey::Status).unwrap(),
+            total_payments: storage.get(&ScheduleKey::TotalPayments).unwrap(),
+            payments_made: storage.get(&ScheduleKey::PaymentsMade).unwrap(),
         }
+    }
+
+    /// Returns the total number of payments this schedule will ever make, or
+    /// `0` if it is unlimited and only stops when the sender calls `cancel()`.
+    pub fn get_total_payments(env: Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&ScheduleKey::TotalPayments)
+            .unwrap()
+    }
+
+    /// Returns how many payments have executed successfully so far.
+    pub fn get_payments_made(env: Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&ScheduleKey::PaymentsMade)
+            .unwrap()
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -306,6 +378,8 @@ impl RecurringPayment {
         storage.extend_ttl(&ScheduleKey::Interval, TTL_THRESHOLD, TTL_EXTEND_TO);
         storage.extend_ttl(&ScheduleKey::NextPaymentTime, TTL_THRESHOLD, TTL_EXTEND_TO);
         storage.extend_ttl(&ScheduleKey::Status, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&ScheduleKey::TotalPayments, TTL_THRESHOLD, TTL_EXTEND_TO);
+        storage.extend_ttl(&ScheduleKey::PaymentsMade, TTL_THRESHOLD, TTL_EXTEND_TO);
     }
 }
 
