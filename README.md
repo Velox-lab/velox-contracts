@@ -49,10 +49,11 @@ The core streaming contract. Holds funds in escrow and releases them to the reci
 ### `RecurringPayment`
 Handles fixed-interval recurring payments (e.g., weekly payroll, monthly subscriptions).
 
-- `create_schedule(sender, recipient, token, amount, interval, start_time)`
-- `execute_payment(schedule_id)` — called by the scheduler daemon at each interval; pulls the payment from the sender via token allowance (the sender must `approve` the schedule contract as spender), so no sender signature is needed
+- `create_schedule(sender, recipient, token, amount, interval, start_time, total_payments)` — `total_payments` is `0` for an unlimited schedule (runs until cancelled), or a fixed count after which the schedule completes itself
+- `execute_payment(schedule_id)` — called by the scheduler daemon at each interval; pulls the payment from the sender via token allowance (the sender must `approve` the schedule contract as spender), so no sender signature is needed. On the payment that reaches `total_payments`, the schedule moves to `Completed` and further calls fail the same way they would on a cancelled schedule
 - `cancel_schedule(sender, schedule_id)`
 - `get_next_payment_time(schedule_id)`
+- `get_payments_made(schedule_id)` / `get_total_payments(schedule_id)`
 
 ### `VeloxRegistry`
 A lightweight on-chain registry that indexes all active streams and schedules for discoverability.
